@@ -14,26 +14,32 @@ Plus-only enriched-adapter proposal preserved at `27a8bdf3`. Current authority:
 - `ignore`: literal relative subtree exclusions, including nested deletions.
 - `followReplacements: true`: existing file parent-anchor, survives atomic save
   and following edit. Requests for directories fail rather than silently downgrade.
-- Native decorator snapshots parent/lexical-ancestor device/inode identities and
-  checks before forwarding events plus every 100 ms. Observed identity change
+- Native decorator snapshots the actual parent anchor's device/inode identity and
+  stats its lexical path once per event and every 100 ms. Observed identity change
   fails with `UnexpectedEof`; stat failures propagate. Missing identities fail
-  explicitly. Scoped guards do not retry, rearm or synthesize root updates.
+  explicitly. Ancestor replacement fails when that parent path disappears or
+  resolves to a different inode; preserving the watched parent is not itself
+  coverage loss. Scoped guards do not retry, rearm or synthesize root updates.
 - Known enhanced stream completion fails; source failures propagate. No retry
   across loss without caller reconciliation.
 - Optional `WatchPlus.reconcile(dirtiness, read)` works with ordinary native and
   enhanced streams. It performs an initial read, serializes subsequent reads,
   and retains one coalesced pending rerun for hints received during a read.
   Typed read/watch failures propagate and completion fails with `UnexpectedEof`;
-  disposal interrupts both operations. Caller `Stream.retry(policy)` reopens and
-  rereads; no automatic policy or OS acquisition acknowledgement is introduced.
+  disposal interrupts both operations. Caller `Stream.retry(policy)` reopens
+  replayable sources and rereads; terminal owners (e.g. Watchman's manager after
+  socket failure) require caller layer reconstruction. No automatic policy or OS
+  acquisition acknowledgement is introduced.
 - Effect 4.0.1 exact peer/test baseline; native platform packages also pinned to
   4.0.1. No runtime dependencies/bundled duplicate Effect. Bun lock, build,
   typecheck, test, public exports and a native example are working.
 
 Commits: gate `ebdc5af0`; package baseline `481abfcc`.
 Watchman gate `c6f11e13`; direct independent seam `8a5313d4`.
-Parent/ancestor identity guard: `09e1c5e4`. Helper implementation is the next
-coherent commit after that guard; no pushes or releases were performed.
+Initial parent/ancestor identity guard: `09e1c5e4`; helper: `d89b6dbc`.
+Focused parent review correction narrows the guard to one actual-parent stat per
+check, removing O(files * depth) stat calls without adding shared resources.
+The predecessor is preserved; no pushes or releases were performed.
 
 ## Verification receipt
 
@@ -57,6 +63,13 @@ failures). Built `dist/effect-watch-plus.js` exported the helper and produced an
 initial read through the public namespace. No new tarball/reinstall cycle was
 needed for this additive namespace export.
 
+Parent-review correction: typecheck/build passed; **18 tests passed** in one
+run. Existing native parent deletion/replacement and ancestor replacement tests
+still pass. The scoped guard fixture now observes events and polling ticks and
+asserts every check after initial target stat uses only the actual parent path.
+A native test atomically changes an ancestor route while preserving the parent
+inode, spans two polling periods, and verifies a subsequent edit still arrives.
+
 Both `bun pm pack` outputs installed in
 `/home/rektide/tmp-opencode/watch-additive-consumer`: strict typecheck passed;
 **3 public-export tests passed**. Same consumer used `WatchPlus.fileSystem` on
@@ -66,8 +79,8 @@ resolution checked one Effect identity. Maintained source:
 
 ## Next stage for Sol Medium, coordinated by parent
 
-1. Initial missing rejection stays v1 policy. Native existing-file ancestor-loss
-   detection is implemented, not recovery. Missing interests and full topology
+1. Initial missing rejection stays v1 policy. Native existing-file parent-anchor
+   loss detection is implemented, not recovery. Missing interests and full topology
    recovery remain a later jointly versioned opt-in; review before new options.
 2. The optional caller-owned read/reconcile helper is now implemented. Test it
    against independent Watchman's enhanced fs when that backend is ready; no
@@ -83,8 +96,9 @@ coordination; do not edit the other repo concurrently without assignment.
 ## Limits / architecture review boundaries
 
 Current missing targets fail. Directory/parent replacement is not repaired;
-observed existing-file parent/ancestor identity loss terminates the native stream.
-The polling guard retains one snapshot per lexical ancestor. It cannot prove
+observed existing-file parent anchor loss terminates the native stream, including
+ancestor replacement that changes the resolved parent. The polling guard retains
+one parent snapshot per stream; same-parent sharing is deferred. It cannot prove
 continuous coverage or detect every detach/restore gap or inode reuse, and does
 not strengthen recovery requirements for all independent v1 providers.
 No readiness barrier, resync union, aligned inventory, clocks, automatic retry,

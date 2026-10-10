@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { Deferred, Effect, Fiber, FileSystem, Layer, Path, PlatformError, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, PlatformError, Queue, Stream } from "effect"
 import { WatchPlus } from "../effect-watch-plus.js"
 
 const base = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
@@ -218,7 +218,7 @@ for (const loss of ["delete-parent", "replace-parent", "replace-ancestor"] as co
   })
 }
 
-test("followReplacements interruption releases the source and stops ancestor checks", async () => {
+test("followReplacements checks only the parent on events and ticks; interruption disposes both", async () => {
   const owners = new Set<string>()
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -227,18 +227,33 @@ test("followReplacements interruption releases the source and stops ancestor che
     const target = directory + "/config"
     yield* fs.writeFileString(target, "before")
     const installed = yield* Deferred.make<void>()
+    const forwarded = yield* Deferred.make<void>()
+    const ticked = yield* Deferred.make<void>()
+    const hints = yield* Queue.make<FileSystem.WatchEvent>()
     const checks: Array<string> = []
     const watched = WatchPlus.make({
       ...fs,
-      stat: (name) => fs.stat(name).pipe(Effect.tap(() => Effect.sync(() => checks.push(name)))),
-      watch: (name, options) => Stream.unwrap(Effect.gen(function*() {
+      stat: (name) => fs.stat(name).pipe(Effect.tap(() => Effect.gen(function*() {
+        checks.push(name)
+        // Initial target and anchor, one event check, then at least one tick.
+        if (checks.length >= 4) yield* Deferred.succeed(ticked, undefined)
+      }))),
+      watch: (name) => Stream.unwrap(Effect.gen(function*() {
         yield* Effect.acquireRelease(Effect.sync(() => owners.add(name)), () => Effect.sync(() => owners.delete(name)))
         yield* Deferred.succeed(installed, undefined)
-        return fs.watch(name, options)
+        return Stream.fromQueue(hints)
       }))
     }, path)
-    const fiber = yield* watched.watch(target, { followReplacements: true }).pipe(Stream.runDrain, Effect.forkScoped)
+    const fiber = yield* watched.watch(target, { followReplacements: true }).pipe(
+      Stream.runForEach(() => Deferred.succeed(forwarded, undefined)), Effect.forkScoped
+    )
     yield* Deferred.await(installed).pipe(Effect.timeout("2 seconds"))
+    yield* Queue.offer(hints, { _tag: "Update", path: "config" })
+    yield* Deferred.await(forwarded).pipe(Effect.timeout("2 seconds"))
+    yield* Deferred.await(ticked).pipe(Effect.timeout("2 seconds"))
+    expect(checks[0]).toBe(target)
+    expect(checks.slice(1).every((name) => name === directory)).toBe(true)
+    expect(checks.length).toBeGreaterThanOrEqual(4)
     yield* Fiber.interrupt(fiber)
     expect(owners.size).toBe(0)
     const count = checks.length
@@ -247,4 +262,36 @@ test("followReplacements interruption releases the source and stops ancestor che
     expect(checks.length).toBe(count)
   })).pipe(Effect.provide(base)))
   expect(owners.size).toBe(0)
+})
+
+test("changing an ancestor while preserving the resolved parent does not detach the native watcher", async () => {
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* WatchPlus.fileSystem
+    const directory = yield* temporary(fs)
+    yield* fs.makeDirectory(directory + "/shared")
+    yield* fs.makeDirectory(directory + "/first")
+    yield* fs.makeDirectory(directory + "/second")
+    yield* fs.symlink(directory + "/shared", directory + "/first/parent")
+    yield* fs.symlink(directory + "/shared", directory + "/second/parent")
+    yield* fs.symlink(directory + "/first", directory + "/ancestor")
+    const target = directory + "/ancestor/parent/config"
+    yield* fs.writeFileString(target, "before")
+    const installed = yield* Deferred.make<void>()
+    const edited = yield* Deferred.make<void>()
+    const watcher = yield* fs.watch(target, { followReplacements: true }).pipe(Stream.runForEach(() => Effect.gen(function*() {
+      const value = yield* fs.readFileString(target)
+      if (value === "probe") yield* Deferred.succeed(installed, undefined)
+      if (value === "after") yield* Deferred.succeed(edited, undefined)
+    })), Effect.forkScoped)
+    const writer = yield* Effect.forever(fs.writeFileString(target, "probe").pipe(Effect.andThen(Effect.sleep("10 millis")))).pipe(Effect.forkScoped)
+    yield* Deferred.await(installed).pipe(Effect.timeout("2 seconds"))
+    yield* Fiber.interrupt(writer)
+    // Atomic ancestor reroute: its identity changes, but the parent inode does not.
+    yield* fs.symlink(directory + "/second", directory + "/replacement")
+    yield* fs.rename(directory + "/replacement", directory + "/ancestor")
+    yield* Effect.sleep("250 millis")
+    yield* fs.writeFileString(directory + "/shared/config", "after")
+    yield* Deferred.await(edited).pipe(Effect.timeout("2 seconds"))
+    yield* Fiber.interrupt(watcher)
+  })).pipe(Effect.provide(enhanced)))
 })

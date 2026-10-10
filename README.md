@@ -29,11 +29,13 @@ const program = Effect.gen(function*() {
 - `followReplacements: true`: watch an **existing file's parent**, select the
   basename, and survive replacement of that file while parent coverage holds.
   Directory requests and initially missing targets fail. The native decorator
-  snapshots device/inode identities of the parent and lexical ancestors, checks
-  them before forwarding events and every 100 ms, and fails on observed loss
+   snapshots the parent's device/inode identity, stats its lexical path once
+   before each event and every 100 ms, and fails on observed loss
   (`UnexpectedEof` for changed identity; filesystem errors for failed checks).
   Identity-unavailable filesystems fail explicitly. Guards are scoped and retain
-  only one snapshot per lexical ancestor; they never rearm or fabricate events.
+   only one parent snapshot per stream; they never rearm or fabricate events.
+   Ancestor replacement is detected if the parent path disappears or resolves
+   to a different inode; an ancestor move preserving that parent is not a loss.
   It watches the lexical entry, not writes through symbolic links to a referent.
 - `WatchPlus.fileSystem`: returns the same filesystem object with enhanced
   option types, or fails with `PlatformError/BadArgument` if not installed.
@@ -91,6 +93,9 @@ reopening re-executes the watch and initial authoritative read. Choose which
 errors to retry explicitly; do not indiscriminately swallow permanent read or
 configuration failures. Effect's Stream retry schedule resets after an emitted
 value, so a retry count is not a total lifetime reopen budget.
+Retry alone requires a replayable source: a provider with a terminal owner, such
+as Watchman's manager after socket failure, requires the caller to rebuild its
+owning layer before reopening.
 
 Subscription and the initial read run concurrently, **not behind an OS readiness
 barrier**. The rerun guarantee applies to hints the stream actually receives;

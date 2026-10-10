@@ -34,7 +34,8 @@ export const fileSystem = Effect.flatMap(FileSystem.FileSystem, (fs) => supports
  * A hint received during a read leaves a pending rerun. Reads are serialized
  * and backpressured; Effect's merge may read one ahead. No native-ready guarantee.
  * Read/watch errors propagate; watch completion fails rather than hanging stale.
- * Applying Stream.retry reopens the source and starts with another initial read.
+ * Applying Stream.retry reopens replayable sources with another initial read;
+ * terminal provider owners must be rebuilt by the caller.
  */
 export function reconcile<A, E, R, EW, RW>(
   dirtiness: Stream.Stream<unknown, EW, RW>,
@@ -82,7 +83,7 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
           ? fs.watch(directory, { recursive: false })
           : fs.watch(target, { recursive: options.recursive })
         const check = options.followReplacements
-          ? yield* parentGuard(fs, path, directory, target)
+          ? yield* parentGuard(fs, directory, target)
           : Effect.void
         const filtered = source.pipe(
           Stream.mapEffect((event) => Effect.as(check, event)),
@@ -104,32 +105,25 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
   }
 }
 
-/** Bounded by lexical path depth; never rearm a watcher across identity loss. */
-function parentGuard(fs: FileSystem.FileSystem, path: Path.Path, directory: string, target: string) {
+/** Stat the lexical anchor path: ancestor changes matter if it no longer resolves to the watched parent. */
+function parentGuard(fs: FileSystem.FileSystem, directory: string, target: string) {
   return Effect.gen(function*() {
-    const names: Array<string> = []
-    for (let name = directory; ; name = path.dirname(name)) {
-      names.push(name)
-      if (path.dirname(name) === name) break
+    const anchor = yield* fs.stat(directory)
+    if (anchor.type !== "Directory" || Option.isNone(anchor.ino)) {
+      return yield* Effect.fail(PlatformError.badArgument({
+        module: "WatchPlus", method: "watch", description: "followReplacements requires directory identity information"
+      }))
     }
-    const anchors = yield* Effect.forEach(names, (name) => Effect.gen(function*() {
-      const info = yield* fs.stat(name)
-      if (info.type !== "Directory" || Option.isNone(info.ino)) {
-        return yield* Effect.fail(PlatformError.badArgument({
-          module: "WatchPlus", method: "watch", description: "followReplacements requires directory identity information"
-        }))
-      }
-      return { name, dev: info.dev, ino: info.ino.value }
-    }))
-    return Effect.forEach(anchors, (anchor) => Effect.gen(function*() {
-      const info = yield* fs.stat(anchor.name)
-      if (info.type !== "Directory" || info.dev !== anchor.dev || Option.isNone(info.ino) || info.ino.value !== anchor.ino) {
+    const ino = anchor.ino.value
+    return Effect.gen(function*() {
+      const info = yield* fs.stat(directory)
+      if (info.type !== "Directory" || info.dev !== anchor.dev || Option.isNone(info.ino) || info.ino.value !== ino) {
         return yield* Effect.fail(PlatformError.systemError({
           module: "WatchPlus", method: "watch", _tag: "UnexpectedEof", pathOrDescriptor: target,
-          description: `Watch ancestor identity changed: ${anchor.name}; reconcile before restarting`
+          description: `Watch parent anchor identity changed: ${directory}; reconcile before restarting`
         }))
       }
-    }), { discard: true })
+    })
   })
 }
 
