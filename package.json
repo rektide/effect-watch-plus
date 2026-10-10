@@ -1,10 +1,27 @@
 {
 	"name": "effect-watch-plus",
 	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
+	"description": "Additive watch options for Effect FileSystem",
+	"main": "./dist/effect-watch-plus.js",
+	"types": "./dist/effect-watch-plus.d.ts",
+	"exports": {
+		".": { "types": "./dist/effect-watch-plus.d.ts", "default": "./dist/effect-watch-plus.js" },
+		"./package.json": "./package.json"
+	},
+	"files": ["dist", "README.md"],
+	"sideEffects": false,
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"build": "tsgo -p tsconfig.build.json",
+		"typecheck": "tsgo --noEmit -p tsconfig.json",
+		"test": "bun test ./test"
+	},
+	"peerDependencies": { "effect": "4.0.1" },
+	"devDependencies": {
+		"effect": "4.0.1",
+		"@effect/platform-node": "4.0.1",
+		"@effect/platform-node-shared": "4.0.1",
+		"@types/bun": "1.4.0",
+		"@typescript/native-preview": "7.0.0-dev.20251207.1"
 	},
 	"repository": {
 		"type": "git",
@@ -17,6 +34,5 @@
 		"url": "https://github.com/rektide/effect-watch-plus/issues"
 	},
 	"homepage": "https://github.com/rektide/effect-watch-plus#readme",
-	"module": "effect-watch-plus.js",
 	"type": "module"
 }
