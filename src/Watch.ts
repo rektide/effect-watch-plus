@@ -1,6 +1,6 @@
 export * as WatchPlus from "./Watch.js"
 
-import { Effect, FileSystem, Layer, Option, Path, PlatformError, Predicate, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, PlatformError, Predicate, Queue, Stream } from "effect"
 
 /** Structural contract shared with independent enhanced-watch providers. */
 export const TypeId = "~effect-watch/options/v1"
@@ -28,6 +28,34 @@ export const fileSystem = Effect.flatMap(FileSystem.FileSystem, (fs) => supports
   : Effect.fail(PlatformError.badArgument({
     module: "WatchPlus", method: "fileSystem", description: "Enhanced watch options are not installed"
   })))
+
+/**
+ * Caller-owned authoritative reads, initially and after coalesced dirtiness.
+ * A hint received during a read leaves a pending rerun. Reads are serialized
+ * and backpressured; Effect's merge may read one ahead. No native-ready guarantee.
+ * Read/watch errors propagate; watch completion fails rather than hanging stale.
+ * Applying Stream.retry reopens the source and starts with another initial read.
+ */
+export function reconcile<A, E, R, EW, RW>(
+  dirtiness: Stream.Stream<unknown, EW, RW>,
+  read: Effect.Effect<A, E, R>
+): Stream.Stream<A, E | EW | PlatformError.PlatformError, R | RW> {
+  return Stream.unwrap(Effect.gen(function*() {
+    // A dirty bit, not an event backlog. Hints during reads never get cleared by
+    // finishing that read: only starting the next read consumes the token.
+    const dirty = yield* Queue.make<void>({ capacity: 1, strategy: "sliding" })
+    yield* Queue.offer(dirty, undefined)
+    return Stream.fromEffectRepeat(Queue.take(dirty).pipe(Effect.andThen(read))).pipe(
+      Stream.mergeEffect(dirtiness.pipe(
+        Stream.runForEach(() => Queue.offer(dirty, undefined)),
+        Effect.andThen(Effect.fail(PlatformError.systemError({
+          module: "WatchPlus", method: "reconcile", _tag: "UnexpectedEof",
+          description: "Dirtiness stream ended; reconcile before restarting"
+        })))
+      ))
+    )
+  }))
+}
 
 /** Capture an already constructed filesystem. No context lookup occurs in watch. */
 export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSystem {

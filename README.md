@@ -56,6 +56,47 @@ The same checked view works with independent enhanced providers such as
 `effect-watchman`; **WatchPlus.layer is not required** for those providers.
 No Parcel, OpenCode import or Effect runtime dependency is bundled.
 
+## Optional authoritative reads
+
+`WatchPlus.reconcile(dirtiness, read)` is an ordinary Stream helper, not a
+service or requirement for watch callers. It also works with native filesystems:
+
+```ts
+import { Effect, FileSystem, Stream } from "effect"
+import { WatchPlus } from "effect-watch-plus"
+
+const values = Stream.unwrap(Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  return WatchPlus.reconcile(
+    fs.watch("/my/config-directory"),
+    fs.readFileString("/my/config-directory/settings.json")
+  )
+}))
+// Provide your native or enhanced filesystem layer as usual.
+const program = values.pipe(Stream.runForEach((value) => Effect.log(value)))
+```
+
+The first read needs no hint. Subsequent hints coalesce into one pending dirty
+token, with reads serialized. A hint received while a read is running leaves a
+rerun pending **even if that read returns an older value**. Reads are
+backpressured (Effect's merge can start one read ahead of downstream demand);
+intermediate values need not appear. This
+bounds the helper's dirty state, not upstream native buffering or caller data.
+The background watcher and active read are interrupted on stream disposal.
+
+Read/watch typed errors propagate unchanged and end the stream;
+watch completion fails with `PlatformError/UnexpectedEof`. Nothing retries by
+default. A caller may compose `values.pipe(Stream.retry(yourReopenPolicy))`:
+reopening re-executes the watch and initial authoritative read. Choose which
+errors to retry explicitly; do not indiscriminately swallow permanent read or
+configuration failures. Effect's Stream retry schedule resets after an emitted
+value, so a retry count is not a total lifetime reopen budget.
+
+Subscription and the initial read run concurrently, **not behind an OS readiness
+barrier**. The rerun guarantee applies to hints the stream actually receives;
+startup gaps, upstream-dropped events and hidden losses still require caller
+reconciliation policy. No synthetic WatchEvent or app-owned cache is introduced.
+
 ```sh
 bun install --frozen-lockfile
 bun run typecheck
