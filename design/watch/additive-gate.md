@@ -21,7 +21,7 @@ that the enhancement contract is installed, not global mutable state. Providers
 can implement it independently. No global module augmentation, second service
 identity, monkey patch, unchecked cast, or upstream source change is needed.
 
-Consumer shape (the package baseline will preserve this experiment):
+Proven consumer shape:
 
 ```ts
 const fs = yield* WatchPlus.fileSystem
@@ -55,7 +55,26 @@ platform-node-shared 4.0.1 from the installed consumer dependencies.
   and a subsequent edit all reached the consumer. No sleep claimed readiness.
 
 These are seam proofs, not daemon conformance. The independent backend was a
-fixture. The baseline will add maintained tests and cross-package build evidence.
+fixture.
+
+### Maintained baseline and package boundary receipt
+
+Plus package baseline `481abfcc`, Watchman direct seam `8a5313d4`:
+`bun run typecheck` and `bun run build` passed in both repositories.
+`WATCH_TEST_DIRECTORY=/home/rektide/tmp-opencode bun run test`: **8 Plus passed**,
+**6 Watchman passed**. These include real native nested recursion, file atomic
+replacement + later edit, errors/completion, explicit refusal, same-object
+checked view, lazy acquisition, sibling cleanup and one Layer-owned backend.
+
+`bun pm pack --destination /home/rektide/tmp-opencode/watch-additive-gate` in each
+repo produced installable tarballs. The isolated project
+`/home/rektide/tmp-opencode/watch-additive-consumer` installed both tarballs, Effect
+4.0.1 and pinned platform-node/shared 4.0.1. Strict typecheck and **3 tests passed**:
+same consumer on both implementations, with no Plus decorator in the Watchman
+composition, and both package imports resolving the consumer's one Effect identity.
+Only public package exports were imported. The maintained
+[consumer proof](consumer-proof.test.ts) records that experiment for repetition.
+No daemon, OpenCode source, live service, push or publication was used.
 
 ## Limits and next stage
 

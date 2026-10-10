@@ -1,311 +1,159 @@
-# Watch Plus / Watchman composition contract
+# Additive Effect watch contract
 
-Proposed implementation contract, 2026-10-10. Owner: `effect-watch-plus`.
-Prepared by GPT-6 Astra with independent Sol-medium source/design investigations
-`ses_ed7f6ce6fffeqBoXpACAUJbt20` (native/Plus) and
-`ses_ed7f6ce67ffeCV306SgxMXCWvj` (Watchman/enrichment).
+Current bounded implementation contract, 2026-10-10, GPT-6.1 Sol.
+The user-selected additive direction replaces the mandatory `WatchPlus.open`
+observation-service architecture preserved at Plus `27a8bdf3` / Watchman
+`a31fda8d`. Those commits are design history, not current constraints.
+[The architecture gate](additive-gate.md) passed before package implementation.
 
-This is a build brief, not an implemented or released API. Names in sketches
-can be adjusted during implementation; ownership and guarantees are deliberate.
+## Public vocabulary and composition
 
-## Decision
+The operation remains **`fs.watch(path, options)`**. Standard options/events
+remain Effect's `recursive` and Create/Update/Remove. Version 1 enhances options:
 
-Build **a scoped Effect observation service with a pluggable source**. The
-default source consumes Effect's existing `FileSystem.watch`. Do not wrap or
-replace `FileSystem` inside Watch Plus, and do not rebuild native recursion.
-
-`effect-watchman` provides a normal Effect `WatchBackend` and its own stronger
-Watchman observation API. An optional `effect-watch-plus/watchman` adapter uses
-those stronger operations. Consumers get a stable high-level interface; source
-capabilities improve its implementation without being mandatory for native use.
-
-```text
-effect-watch-plus/core ──────────────→ Effect
-    native source ──────────────────→ supplied Effect FileSystem.watch
-effect-watch-plus/watchman ──────────→ effect-watch-plus/core
-                         └──────────→ effect-watchman
-effect-watchman ─────────────────────→ Effect / runtime transport
-    standard WatchBackend + enhanced observations share one manager
+```ts
+interface WatchOptions extends FileSystem.WatchOptions {
+  readonly ignore?: ReadonlyArray<string> | undefined
+  readonly followReplacements?: boolean | undefined
+}
 ```
 
-Watchman does not import Watch Plus, even for types. Plus owns the generic
-provider interface and the translation. `effect-watchman` is an optional peer
-for the adapter export, never an eagerly imported dependency of Plus's native
-entrypoint. Use one Effect peer identity. No contract-only third package and no
-Parcel dependency are necessary.
+An enhanced filesystem extends Effect's service with the wider watch signature
+and `readonly ["~effect-watch/options/v1"]: true`. This versioned marker is a
+provider's complete contract promise. Plus and Watchman export structurally
+compatible option/filesystem types and checked accessors. They need no shared
+runtime service, global mutation, registry, or third contract package.
 
-## Why a service rather than a backend decorator?
-
-Effect 4.0.1's backend implements:
-
-```text
-register(path, stat, options?) → Option<Stream<WatchEvent, PlatformError>>
+```ts
+const fs = yield* WatchPlus.fileSystem // checked typed view of Effect's service
+fs.watch(target)
+fs.watch(target, { recursive: true })
+fs.watch(target, { recursive: true, ignore: ["generated"] })
+fs.watch(existingFile, { followReplacements: true })
 ```
 
-The Node filesystem calls `stat` first, invokes `register` if a backend was
-provided when its Layer was constructed, and falls back to its own native code
-when the answer is `None`. Native behavior therefore is not itself a backend
-value that a generic decorator can simply delegate to. The interface also
-cannot carry per-request ignores, readiness strength or reconciliation notices.
+The accessor returns the **same object** already at Effect's FileSystem key.
+It fails with `PlatformError/BadArgument` if the marker is absent. It is not an
+observation acquisition API and installs nothing. Independent Watchman users
+may use `Watchman.fileSystem` instead; the signature and behavior are identical.
+Ordinary consumers can keep yielding `FileSystem.FileSystem` unchanged.
 
-Plus captures an already-constructed filesystem and exposes its own service.
-It never replaces that filesystem, avoiding a `fs.watch → Plus → fs.watch`
-cycle. The Watchman adapter talks directly to the shared Watchman manager. Its
-standard Effect backend uses the same manager rather than a second resource pool.
+Do not globally augment Effect's WatchOptions. That would let an unenhanced
+native filesystem silently ignore requested options. TypeScript structural
+assignment can still allow prebuilt excess-property variables on base Effect;
+those calls are not a supported way to request enhancements. Future vocabulary
+must add a checked/versioned contract, rather than promising new semantics on
+providers implementing only v1. A marker is a trusted provider contract, not a
+security validator for arbitrary JS implementations.
 
-At host composition:
+### Native decoration
 
-- **native:** construct Effect's filesystem without a Watchman backend; build
-  Plus from that filesystem;
-- **watchman:** construct one Watchman manager; provide its backend while
-  building the Effect filesystem if ordinary `fs.watch` users need it, and
-  provide its enhanced source to Plus;
-- never call a filesystem that was already configured with Watchman a forced
-  native provider merely because the Plus adapter is named `fromFileSystem`.
-
-No mutation of global services or monkey-patching of `FileSystem.watch`.
-
-## Public concepts
-
-### Interest
-
-A request declares an absolute **lexical** target and one of:
-
-- exact file;
-- direct directory entries, optionally selected names;
-- directory tree using existing `recursive: true` support.
-
-It may include a documented ignore policy and coalescing options. File existence
-is not required at request time. Keep target identity distinct from the current
-native watch anchor and the daemon's canonical root. A lexical symlink alias can
-be followed/re-resolved deliberately without promising recursive symlink traversal.
-
-Do not inherit Parcel's ignore language by accident. Start with literal subtree
-exclusions and a documented pathname-glob matcher. Specify dotfiles, separators,
-case handling, absolute/relative ignores and subtree boundaries. Arbitrary
-application predicates remain local. Git-ignore semantics are a separate concern.
-
-### Scoped observation
-
-Conceptual consumer shape:
-
-```text
-WatchPlus.open(interest): Effect<Observation, WatchError, Scope>
-
-Observation:
-  ready: Effect<Readiness, WatchError>
-  notices: Stream<Notice, WatchError>
+```ts
+const filesystem = WatchPlus.layer.pipe(
+  Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer))
+)
 ```
 
-Acquisition starts the owned observation task and creates its delivery buffer;
-consumption must not be necessary to start the underlying observation. Scope
-owns both immediately, including partial acquisition and any background fibers.
-One returned handle has one documented stream-consumption lifetime. Sharing
-occurs through multiple handles, not accidental concurrent consumption of the
-same queue. Releasing one handle leaves sibling consumers alive.
+Plus captures an **already constructed** filesystem and Path, then replaces
+only watch in its Layer output. Watch closures call the captured input, not a
+filesystem fetched from the replaced context. Non-watch functions retain their
+identities. Unenhanced calls delegate unchanged, including native recursion.
+If the input already uses a Watchman backend, it is not a forced-native layer.
 
-`ready` answers initial startup **quality**, not universal filesystem freshness:
+### Independent Watchman
 
-- `best-effort`: the native observation task has started; no registration
-  acknowledgement is available from the supplied Effect stream;
-- `acknowledged`: the provider confirms subscription installation;
-- a provider's separately offered aligned inventory operation may additionally
-  bind a baseline to subsequent deltas.
-
-Initial caller reconciliation finishing is another fact. Do not describe
-`best-effort` as an OS registration barrier, or `acknowledged` as a content
-snapshot. An initial readiness Effect completes once; ongoing loss/recovery is
-represented in the ordered notices/error behavior, not by reusing that Effect.
-
-### Notices and reconciliation
-
-First-cut notices are small:
+Watchman directly implements the same options with its captured backend. The
+current seam is `Watchman.fromBackend`, requiring Effect FileSystem, Path and
+WatchBackend. It never calls the captured filesystem's watch and never constructs
+Plus's layer. Backend `None` fails explicitly, not native fallback. The next
+daemon manager stage supplies one scoped backend/manager, shared with any base
+filesystem using it. The decorator creates no managers or background tasks.
 
 ```text
-Hint { path: absolute lexical path, scope: path | subtree }
-Resync { root: affected scope, reason }
+effect-watch-plus → Effect peer
+effect-watchman   → Effect peer (later runtime transport)
+application      → either provider; one Effect identity
 ```
 
-They describe a need to re-examine state, not an exact journal. A provider may
-retain richer internal metadata, but consumers need not understand native event
-names or Watchman clocks. Precise create/delete classification is only exposed
-by an inventory-owning operation that can support it.
+No dependency between the two packages is needed for v1. Their small structural
+contract is recorded here and proved using installed public package exports.
+Any future common helper export must not make a Plus policy runtime mandatory
+for Watchman. Optional richer operations can preserve daemon information directly.
 
-Most edits, creates/deletes, atomic saves and uncertain rename classifications
-are ordinary hints. Coalesce them into affected paths/subtrees. A normal atomic
-save under a continuously observed parent does not require a whole-root rescan.
+## Exact v1 semantics
 
-`Resync` is necessary when the set of received hints may be incomplete: failed
-or unexpectedly completed watcher, reacquired/detached anchor, known queue loss,
-Watchman fresh history or a gap that cannot be caught up. Example: a file is
-deleted while disconnected; reconnection enumerates only current files. Without
-reconciliation, a cached entry for the deleted file can survive indefinitely.
+**Ignore** is a list of literal paths; each excludes itself and descendants on
+a path-segment boundary. Directory-relative for directory watches; parent-relative
+for files. Includes dotfiles, case-sensitive matching, platform Path separators,
+normalization of `.` and trailing separators. Empty, absolute and escaping
+exclusions fail with BadArgument. Wildcard characters are literal. No glob,
+Git-ignore, filesystem identity or recursive symlink traversal promise.
+Native uses local filtering; Watchman currently also filters locally. Proven
+pathname-safe daemon pushdown can optimize it later, retaining residual filtering.
+Never discard deletion tombstones with `exists` filters.
 
-Plus owns handling that situation generically. A helper accepts the caller's
-authoritative read/scan and publishes its result after initial load, relevant
-hints or resync. It serializes/coalesces reloads and reruns if more dirtiness
-arrived during a read. It may offer path/subtree targeting. It does not invent
-an application cache or require an inventory scan on every event. Small config
-owners can reload their whole domain; GUI owners can reread only loaded state.
+**Follow replacements** requires an existing file (`stat` reports File).
+It observes the lexical parent nonrecursively and selects the
+basename. Inode replacement of the file leaves that parent observation intact.
+Ignores apply after file selection. Parent disappearance/replacement, missing
+targets and directory lifecycle resilience are **not** implemented. Recursive
+selection has no extra meaning for this single-file parent anchor.
+Following writes through a symlink to a referent outside that parent is not
+supported; this option observes the lexical directory entry, not symlink identity.
 
-After known loss, the notice cannot be dropped or overtaken by a claim that
-the consumer is fresh. Provider startup/reconnect is separate from completing
-the owner's reload. Fail terminal configuration errors explicitly. Duplicate
-hints are acceptable; silent continuity loss is not acceptable when detected.
+**Paths** retain the underlying Effect event's pathname convention. Pinned Node
+returns anchor-relative callbacks, including basename for files; absolute backend
+paths also filter correctly. This layer does not silently change standard events
+into absolute-path notices. A daemon backend must map names to the logical anchor
+namespace and reject escaping wire paths before publishing typed watch events.
 
-### Provider ownership and enhanced operations
+**Ownership** is stream consumption scoped. Nothing is acquired by constructing
+a watch stream. Closing/interruption releases the source scope. Separate streams
+have separate leases; releasing one does not release its sibling. Native anchor
+sharing is not implemented; backend/manager sharing is Layer-owned. No detached
+tasks, live-service restarts or hidden daemon autospawn are part of the baseline.
 
-Plus owns a small provider interface whose mandatory operation opens an
-observation with the semantics above. NativeProvider is implemented in Plus.
-The optional Watchman adapter implements it using Watchman's own observation
-API. A provider owns transport acquisition, continuity and its recovery loop;
-Plus owns consumer filtering/coalescing/reconciliation. Do not put a second
-independent retry supervisor around an already self-recovering provider.
+**Loss**: source errors propagate. Enhanced native and all direct Watchman stream
+completions fail with PlatformError/UnexpectedEof. Known loss is never fabricated
+as `Update(root)` or silently retried into success. The caller should reconcile
+before reopening; optional reconciliation helpers can later own that loop.
 
-Optional operations replace an entire coherent activity. The first useful
-extension is `openInventory`: baseline metadata plus an ordered delta stream,
-all from the same interest, generation, mapping and filter contract. A provider
-offers it only for a declared inventory model; a generic scan/diff implementation
-can later polyfill it for native users who actually need inventory ownership.
-The first native slice only needs caller-owned read/scan reconciliation.
+## Guarantees ordinary watch cannot express
 
-Do not create independently pluggable `snapshot`, `clock` and `watch` functions
-that callers combine without a shared boundary. Do not allow a daemon names-only
-inventory to silently replace a content-hash or arbitrary stat-based snapshot.
-Supported metadata and freshness meanings belong to that operation's contract.
+There is no installation acknowledgement, initial inventory, resync marker,
+cursor, baseline-to-delta ordering or application-applied checkpoint in the base
+event union. Scoped implementation does not require a scoped-handle public API,
+but richer guarantees require an **optional explicit coherent operation/helper**
+or a small clean upstream extension. Do not reconstruct clocks/readiness after
+stripping metadata through standard events. Do not weaken loss behavior just to
+keep a stream alive. Review each extension's typing and native honesty at its gate.
 
-Watchman can also supply:
+The baseline cannot fix these pinned native internals:
 
-- acknowledged attach and clock-covered setup;
-- canonical root/transport sharing;
-- catch-up within a still-valid history window;
-- compatible pathname filter pushdown;
-- efficient daemon-view inventories.
+- Node stats before backend registration; missing targets fail first.
+- Optional WatchBackend is captured during filesystem Layer construction.
+- Native null filenames are dropped.
+- Rename classification asynchronously stats and can reorder/misclassify hints.
+- Native callback delivery has an upstream unbounded queue.
+- Synchronous `NFS.watch` setup throws in a forked callback setup fiber can fail
+  without reaching the stream's queue. No generic retry/readiness fix is claimed.
 
-Prefer actual optional operations and returned guarantee metadata over a bag of
-capability booleans that advertise methods which cannot fulfil a given request.
+No sleep/yield/fork-start is an OS registration barrier. Event-observed stimulus
+in the native tests establishes only that the test actually saw an event.
+Native undocumented losses remain unknowable; eventual reconciliation requires
+a separate explicit policy. No durable operation journal, exactly-once events,
+rename identity or atomic content snapshot is promised.
 
-## Native source: concrete capabilities and limits
+## Evidence and next boundaries
 
-The pinned Effect 4.0.1 API passes recursive options to native watching. Use it.
-The inspected Node implementation also:
+Package baseline: Plus `481abfcc`, Watchman `8a5313d4`. Strict typechecks/builds
+passed; **8 native/Plus tests**, **6 backend seam tests**. Two tarballs installed
+in a third consumer project passed **3 public-export tests**, including the same
+consumer on both implementations and resolution of one consumer Effect identity.
+See the maintained [consumer proof](consumer-proof.test.ts) and gate receipt.
 
-- consumes lazily, with `stat` before listener setup;
-- exposes no listener-installed acknowledgement;
-- emits callback-relative names, resolving file callbacks relative to the
-  file's parent for classification;
-- drops null filenames before callers can see them;
-- classifies rename via asynchronous stat, treating any stat failure as remove;
-- ends its stream on watcher close and fails on asynchronous watcher error;
-- closes acquired watchers when their scope ends.
-
-Synchronous `NFS.watch` setup throws are a separate limitation: the pinned code
-uses `Effect.sync` inside `Stream.callback`, and callback setup is forked without
-forwarding its failure into the delivery queue. A setup defect may therefore
-leave a pending stream rather than a typed error visible to Plus. Native
-best-effort readiness must not promise detection/retry of every acquisition
-failure. Verify this seam in conformance work; a narrow Effect companion fix
-forwarding setup failure is preferable to reimplementing native watching here.
-
-Therefore raw events are hints and may reorder. Plus must normalize against
-the **actual anchor**, not blindly append a name to the requested target.
-
-Required generic behavior:
-
-1. Watch a file's parent and filter its basename, surviving atomic inode replacement.
-2. Observe an existing ancestor when the target/parents are missing; use native
-   recursion for deeper missing paths and reconcile/reanchor as topology changes.
-3. For a directory root, retain an ancestor/lifecycle interest or an appropriate
-   ancestor anchor. Detect identity replacement and rearm detached watches.
-4. Keep lifecycle detection outside subscriber ignore filtering. Ignoring an
-   event must not prevent the watcher from noticing its own root disappeared.
-5. Share identical physical anchor watches within one Layer via scoped leases.
-   Apply logical subscriber filtering afterward. Overlapping-root consolidation
-   is optional later work.
-6. Provide bounded native retry after observable failures/unexpected completion, plus
-   caller-controlled periodic authoritative reconciliation where needed.
-
-A bounded topology check is reasonable for missing/replaced anchors. It does
-not repair missed descendants. Native callback loss discarded upstream cannot
-be detected immediately by Plus. Periodic reconciliation or a fresh read on use
-can repair current state; neither creates an event-completeness guarantee.
-Do not secretly turn every recursive watch into a repeated full-tree traversal.
-
-No mandatory Effect fork is required for this first cut. A future generic
-readiness/null-notification improvement can strengthen native guarantees; record
-it as companion work rather than pretending it is already present.
-
-## Watchman enrichment rules
-
-`effect-watchman` remains useful independently: Effect `WatchBackend` plus its
-own typed acquired observations/queries. The adapter is in Plus so Watchman
-has no dependency on the high-level policy package.
-
-For aligned inventories, one valid approach is a synchronized daemon query
-returning baseline and clock C, followed by subscribe-since C with the same
-relative root and compatible filter. Buffer pushes immediately, publish baseline
-before deltas, and treat fresh-instance responses as invalidation, not a valid
-incremental result. Never wait for a first nonempty files push to establish
-readiness: empty nonfresh results may be suppressed; use acknowledgement.
-
-Catch-up returns changed final states/tombstones while history remains valid,
-not every intervening operation. A clock can become stale through tombstone GC.
-Bind opaque checkpoints to controller/endpoint, canonical root generation,
-relative root, mapping, recursion, filter and inventory model. A root-global
-latest received clock is not every consumer's applied position. No durable
-portable checkpoint format is needed initially.
-
-Safe first pushdown: pathname-stable exact paths, prefixes/depth and literal
-subtree ignores. For unproven globs or arbitrary predicates, request a
-conservative superset and keep residual local filtering. Test dotfile/case rules.
-Never filter deletion tombstones with an `exists` predicate in a delta feed.
-State-dependent filters can hide membership exits and need extra tracking.
-
-Query-expression pushdown generally reduces result transport/work, not the
-daemon's kernel watches/crawl. Daemon `ignore_dirs`/`ignore_vcs` can already hide
-data; report effective coverage and reject/qualify incompatible requests. Do not
-rewrite the user's root configuration to achieve the application policy.
-
-## Backpressure, ownership and baseline escape hatch
-
-Bound Plus-owned pending path sets/queues. Coalescing can collapse repeated hints. Once a
-consumer has lost deltas, latch resync/failure so it cannot lose the only repair
-signal. Slow consumers must not block unrelated roots. No publishing after
-release; interrupt and join owned work with bounded cleanup.
-
-This does not bound every upstream buffer. Pinned Effect NodeFileSystem uses
-`Stream.callback` with its default unbounded queue and exposes no buffer option
-through `FileSystem.watch`. Plus can drain that stream promptly and bound its
-own delivery/reconciliation work, but cannot claim end-to-end bounded native
-buffering. Document this first-cut limitation; an upstream queue/overflow seam
-would be a separate Effect improvement. Watchman's own transport and delivery
-buffers are under this project's control and must be bounded as specified.
-
-Plain Effect `WatchEvent` has no resync signal. The standard Watchman backend
-therefore fails on known lost continuity (and may initially fail on all transport
-interruptions). Its enhanced observation can use catch-up/resync. Both exports
-must use the same manager; the stronger path must not be implemented by trying
-to reconstruct stripped metadata from plain `fs.watch` events.
-
-Host force-native and force-Watchman choose complete provider compositions.
-Forced native bypasses Watchman configuration/acquisition. Forced Watchman fails
-explicitly on configuration/capability problems and never silently returns
-`None` to fall back to native. Library code takes options; OpenCode reads env.
-
-## Required first-cut acceptance
-
-- Same high-level consumer example runs on native and enhanced Watchman sources.
-- Native file atomic replacement continues delivering subsequent edits.
-- Missing targets/root replacement have tested reanchor behavior and documented limits.
-- Identical consumers share native anchors; Watchman shares canonical roots.
-- Ignores preserve internal topology observation; optimized filters retain deletions.
-- Startup quality is truthful; no sleep/yield is called an acquisition barrier.
-- Known loss results in resync/error, not quiet stale state; empty Watchman
-  catch-up does not hang readiness.
-- Scope closure, cancellation during acquisition, sibling release and slow
-  consumers cannot leak sockets/fibers or silently discard necessary repair.
-
-Optional after the first useful slice: generic maintained inventories, content
-fingerprints, durable cursors, overlapping native-root consolidation, recursive
-symlink traversal, universal Promise facade and additional backends. No Parcel
-work or API compatibility is required to establish this contract.
+Next owner boundaries: Plus's missing/replaced topology and caller reconciliation;
+Watchman's scoped transport, manager, standard backend and daemon conformance.
+No aligned inventory engine or universal service framework is needed to extend
+this seam. Parent coordinates later stages and their review. Parcel and OpenCode
+source changes are expressly outside this baseline.
