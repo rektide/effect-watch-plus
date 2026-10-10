@@ -1,6 +1,6 @@
 export * as WatchPlus from "./Watch.js"
 
-import { Effect, FileSystem, Layer, Path, PlatformError, Predicate, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, PlatformError, Predicate, Stream } from "effect"
 
 /** Structural contract shared with independent enhanced-watch providers. */
 export const TypeId = "~effect-watch/options/v1"
@@ -53,7 +53,11 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
         const source = options.followReplacements
           ? fs.watch(directory, { recursive: false })
           : fs.watch(target, { recursive: options.recursive })
-        return source.pipe(
+        const check = options.followReplacements
+          ? yield* parentGuard(fs, path, directory, target)
+          : Effect.void
+        const filtered = source.pipe(
+          Stream.mapEffect((event) => Effect.as(check, event)),
           Stream.filter((event) => {
             const relative = path.relative(directory, path.resolve(directory, event.path))
             return (!options.followReplacements || relative === path.basename(target)) &&
@@ -64,9 +68,41 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
             description: "Enhanced watcher ended; reconcile before restarting"
           })))
         )
+        return options.followReplacements
+          ? filtered.pipe(Stream.mergeEffect(Effect.forever(check.pipe(Effect.delay("100 millis")))))
+          : filtered
       }))
     }
   }
+}
+
+/** Bounded by lexical path depth; never rearm a watcher across identity loss. */
+function parentGuard(fs: FileSystem.FileSystem, path: Path.Path, directory: string, target: string) {
+  return Effect.gen(function*() {
+    const names: Array<string> = []
+    for (let name = directory; ; name = path.dirname(name)) {
+      names.push(name)
+      if (path.dirname(name) === name) break
+    }
+    const anchors = yield* Effect.forEach(names, (name) => Effect.gen(function*() {
+      const info = yield* fs.stat(name)
+      if (info.type !== "Directory" || Option.isNone(info.ino)) {
+        return yield* Effect.fail(PlatformError.badArgument({
+          module: "WatchPlus", method: "watch", description: "followReplacements requires directory identity information"
+        }))
+      }
+      return { name, dev: info.dev, ino: info.ino.value }
+    }))
+    return Effect.forEach(anchors, (anchor) => Effect.gen(function*() {
+      const info = yield* fs.stat(anchor.name)
+      if (info.type !== "Directory" || info.dev !== anchor.dev || Option.isNone(info.ino) || info.ino.value !== anchor.ino) {
+        return yield* Effect.fail(PlatformError.systemError({
+          module: "WatchPlus", method: "watch", _tag: "UnexpectedEof", pathOrDescriptor: target,
+          description: `Watch ancestor identity changed: ${anchor.name}; reconcile before restarting`
+        }))
+      }
+    }), { discard: true })
+  })
 }
 
 /** Provide the base filesystem and Path to this layer; it replaces only watch. */

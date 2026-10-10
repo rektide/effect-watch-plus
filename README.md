@@ -27,8 +27,13 @@ const program = Effect.gen(function*() {
   parent. Dotfiles are included, matching is case-sensitive, and trailing
   separators/`.` segments normalize. Absolute, empty and escaping ignores fail.
 - `followReplacements: true`: watch an **existing file's parent**, select the
-  basename, and survive replacement of that file. Directory requests fail;
-  missing targets and replaced parents are not handled in this baseline.
+  basename, and survive replacement of that file while parent coverage holds.
+  Directory requests and initially missing targets fail. The native decorator
+  snapshots device/inode identities of the parent and lexical ancestors, checks
+  them before forwarding events and every 100 ms, and fails on observed loss
+  (`UnexpectedEof` for changed identity; filesystem errors for failed checks).
+  Identity-unavailable filesystems fail explicitly. Guards are scoped and retain
+  only one snapshot per lexical ancestor; they never rearm or fabricate events.
   It watches the lexical entry, not writes through symbolic links to a referent.
 - `WatchPlus.fileSystem`: returns the same filesystem object with enhanced
   option types, or fails with `PlatformError/BadArgument` if not installed.
@@ -41,6 +46,11 @@ Enhanced unexpected completion fails with `PlatformError/UnexpectedEof`; errors
 propagate. Reconcile before restarting after known loss. No ready/resync event,
 automatic retry, initial inventory, end-to-end memory bound or exactly-once claim.
 Native null-name drops and synchronous setup defects remain upstream limitations.
+Polling is not an acquisition acknowledgement or continuous coverage proof:
+brief detach/restore gaps, inode reuse and losses hidden upstream can escape
+detection. This is a native-decorator improvement, not a stronger recovery promise
+required of every v1 provider. Initially missing interests and full topology
+recovery need a later jointly versioned opt-in; no such options exist here.
 
 The same checked view works with independent enhanced providers such as
 `effect-watchman`; **WatchPlus.layer is not required** for those providers.

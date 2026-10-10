@@ -7,7 +7,7 @@ const base = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
 const enhanced = WatchPlus.layer.pipe(Layer.provide(base))
 
 const temporary = (fs: FileSystem.FileSystem) => fs.makeTempDirectoryScoped({
-  directory: process.env.WATCH_TEST_DIRECTORY, prefix: "watch-plus-"
+  directory: process.env.WATCH_TEST_DIRECTORY ?? "/home/rektide/tmp-opencode", prefix: "watch-plus-"
 })
 
 test("checked view is the same object; ordinary calls and non-watch functions are unchanged", async () => {
@@ -175,4 +175,76 @@ test("real native file survives atomic replacement and a following edit", async 
     yield* fs.writeFileString(target, "after")
     yield* Deferred.await(edited).pipe(Effect.timeout("2 seconds"))
   })).pipe(Effect.provide(enhanced)))
+})
+
+for (const loss of ["delete-parent", "replace-parent", "replace-ancestor"] as const) {
+  test(`real native followReplacements fails on ${loss} without hanging or affecting siblings`, async () => {
+    await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const fs = yield* WatchPlus.fileSystem
+      const directory = yield* temporary(fs)
+      yield* fs.makeDirectory(directory + "/ancestor/parent", { recursive: true })
+      yield* fs.makeDirectory(directory + "/sibling")
+      const target = directory + "/ancestor/parent/config"
+      const sibling = directory + "/sibling/config"
+      yield* fs.writeFileString(target, "before")
+      yield* fs.writeFileString(sibling, "before")
+      const installed = yield* Deferred.make<void>()
+      const siblingChanged = yield* Deferred.make<void>()
+      const failed = yield* fs.watch(target, { followReplacements: true }).pipe(
+        Stream.runForEach(() => Deferred.succeed(installed, undefined)), Effect.result, Effect.forkScoped
+      )
+      yield* fs.watch(sibling, { followReplacements: true }).pipe(
+        Stream.runForEach(() => Deferred.succeed(siblingChanged, undefined)), Effect.forkScoped
+      )
+      const writer = yield* Effect.forever(fs.writeFileString(target, "probe").pipe(Effect.andThen(Effect.sleep("10 millis")))).pipe(Effect.forkScoped)
+      yield* Deferred.await(installed).pipe(Effect.timeout("2 seconds"))
+      yield* Fiber.interrupt(writer)
+      const removed = directory + (loss === "replace-ancestor" ? "/ancestor" : "/ancestor/parent")
+      if (loss === "delete-parent") yield* fs.remove(removed, { recursive: true })
+      if (loss !== "delete-parent") {
+        yield* fs.rename(removed, directory + "/detached")
+        yield* fs.makeDirectory(directory + "/ancestor/parent", { recursive: true })
+        yield* fs.writeFileString(target, "new identity")
+      }
+      const result = yield* Fiber.join(failed).pipe(Effect.timeout("2 seconds"))
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(["NotFound", "UnexpectedEof"]).toContain(result.failure.reason._tag)
+      }
+      const siblingWriter = yield* Effect.forever(fs.writeFileString(sibling, "after").pipe(Effect.andThen(Effect.sleep("10 millis")))).pipe(Effect.forkScoped)
+      yield* Deferred.await(siblingChanged).pipe(Effect.timeout("2 seconds"))
+      yield* Fiber.interrupt(siblingWriter)
+    })).pipe(Effect.provide(enhanced)))
+  })
+}
+
+test("followReplacements interruption releases the source and stops ancestor checks", async () => {
+  const owners = new Set<string>()
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const directory = yield* temporary(fs)
+    const target = directory + "/config"
+    yield* fs.writeFileString(target, "before")
+    const installed = yield* Deferred.make<void>()
+    const checks: Array<string> = []
+    const watched = WatchPlus.make({
+      ...fs,
+      stat: (name) => fs.stat(name).pipe(Effect.tap(() => Effect.sync(() => checks.push(name)))),
+      watch: (name, options) => Stream.unwrap(Effect.gen(function*() {
+        yield* Effect.acquireRelease(Effect.sync(() => owners.add(name)), () => Effect.sync(() => owners.delete(name)))
+        yield* Deferred.succeed(installed, undefined)
+        return fs.watch(name, options)
+      }))
+    }, path)
+    const fiber = yield* watched.watch(target, { followReplacements: true }).pipe(Stream.runDrain, Effect.forkScoped)
+    yield* Deferred.await(installed).pipe(Effect.timeout("2 seconds"))
+    yield* Fiber.interrupt(fiber)
+    expect(owners.size).toBe(0)
+    const count = checks.length
+    // Deliberately span two polling periods to check disposal, not attachment.
+    yield* Effect.sleep("250 millis")
+    expect(checks.length).toBe(count)
+  })).pipe(Effect.provide(base)))
+  expect(owners.size).toBe(0)
 })

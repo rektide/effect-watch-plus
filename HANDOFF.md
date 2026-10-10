@@ -14,6 +14,10 @@ Plus-only enriched-adapter proposal preserved at `27a8bdf3`. Current authority:
 - `ignore`: literal relative subtree exclusions, including nested deletions.
 - `followReplacements: true`: existing file parent-anchor, survives atomic save
   and following edit. Requests for directories fail rather than silently downgrade.
+- Native decorator snapshots parent/lexical-ancestor device/inode identities and
+  checks before forwarding events plus every 100 ms. Observed identity change
+  fails with `UnexpectedEof`; stat failures propagate. Missing identities fail
+  explicitly. Scoped guards do not retry, rearm or synthesize root updates.
 - Known enhanced stream completion fails; source failures propagate. No retry
   across loss without caller reconciliation.
 - Effect 4.0.1 exact peer/test baseline; native platform packages also pinned to
@@ -41,9 +45,9 @@ resolution checked one Effect identity. Maintained source:
 
 ## Next stage for Sol Medium, coordinated by parent
 
-1. Add explicit missing-file/directory and replaced-parent/root policies, without
-   overstating native acquisition guarantees. Preserve `fs.watch` vocabulary;
-   review any new options/marker version before implementation.
+1. Initial missing rejection stays v1 policy. Native existing-file ancestor-loss
+   detection is implemented, not recovery. Missing interests and full topology
+   recovery remain a later jointly versioned opt-in; review before new options.
 2. Add an optional caller-owned read/reconcile helper. Initial authoritative read,
    coalesced reruns when dirtiness arrives during read, and failure/reopen with
    reconciliation on known loss. Do not invent an app cache or fake root Update.
@@ -57,7 +61,11 @@ coordination; do not edit the other repo concurrently without assignment.
 
 ## Limits / architecture review boundaries
 
-Current missing targets fail. Directory/parent replacement is not repaired.
+Current missing targets fail. Directory/parent replacement is not repaired;
+observed existing-file parent/ancestor identity loss terminates the native stream.
+The polling guard retains one snapshot per lexical ancestor. It cannot prove
+continuous coverage or detect every detach/restore gap or inode reuse, and does
+not strengthen recovery requirements for all independent v1 providers.
 No readiness barrier, resync union, aligned inventory, clocks, generic retry,
 glob matcher, native anchor sharing, or bounded native upstream delivery exists.
 Null filenames and synchronous setup defects can be hidden upstream. Future
