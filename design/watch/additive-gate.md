@@ -90,5 +90,5 @@ Native upstream null-name drops, unbounded callback buffering, asynchronous
 rename classification, and unforwarded synchronous setup defects remain limits.
 Generic decoration cannot fix them or claim an OS attachment barrier.
 Missing targets, replaced parent/directory roots, sharing and transport are not
-proved by this gate. Watchman next builds a scoped manager/backend and implements
+proved by this gate. Watchman next builds a scoped manager/backend and preserves
 the same options directly; it must not need a running Plus policy layer.

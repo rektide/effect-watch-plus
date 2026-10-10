@@ -1,4 +1,4 @@
-import { NodeFileSystem, NodePath } from "@effect/platform-node"
+import { NodeFileSystem, NodePath, NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer, Stream } from "effect"
 import { WatchPlus } from "../effect-watch-plus.js"
 
@@ -11,4 +11,4 @@ const program = Effect.gen(function*() {
   }).pipe(Stream.runForEach((event) => Effect.log(event)))
 })
 
-Effect.runPromise(program.pipe(Effect.provide(filesystem))).catch(console.error)
+NodeRuntime.runMain(program.pipe(Effect.provide(filesystem)))

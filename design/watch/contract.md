@@ -98,8 +98,9 @@ basename. Inode replacement of the file leaves that parent observation intact.
 Ignores apply after file selection. Parent disappearance/replacement, missing
 targets and directory lifecycle resilience are **not** implemented. Recursive
 selection has no extra meaning for this single-file parent anchor.
-Following writes through a symlink to a referent outside that parent is not
-supported; this option observes the lexical directory entry, not symlink identity.
+Following writes through a symbolic link is not supported, even when its referent
+has a different name within the same parent. This option observes the lexical
+directory entry, not symlink identity.
 
 **Paths** retain the underlying Effect event's pathname convention. Pinned Node
 returns anchor-relative callbacks, including basename for files; absolute backend

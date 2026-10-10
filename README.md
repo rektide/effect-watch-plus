@@ -29,7 +29,7 @@ const program = Effect.gen(function*() {
 - `followReplacements: true`: watch an **existing file's parent**, select the
   basename, and survive replacement of that file. Directory requests fail;
   missing targets and replaced parents are not handled in this baseline.
-  It watches the lexical entry, not writes to an external symlink referent.
+  It watches the lexical entry, not writes through symbolic links to a referent.
 - `WatchPlus.fileSystem`: returns the same filesystem object with enhanced
   option types, or fails with `PlatformError/BadArgument` if not installed.
   Ordinary callers can still use Effect's `FileSystem.FileSystem` service.
