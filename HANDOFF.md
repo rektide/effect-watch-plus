@@ -101,7 +101,12 @@ WatchBackend. Construction/consumption exposes no registration acknowledgement.
 Null filenames are dropped. Rename classification does asynchronous stat and
 can reorder/misclassify notifications. Callbacks ordinarily carry relative names,
 including a basename for file watches; normalize against the actual anchor.
-Errors fail and close ends the stream. Scope releases the watcher.
+Asynchronous watcher errors fail and close ends the stream. Scope releases the
+watcher. Synchronous `NFS.watch` setup throws instead become defects in a forked
+callback-setup fiber; the pinned callback implementation does not forward that
+failure to the queue. Plus cannot promise detection/retry of every setup failure.
+Test this boundary and identify a narrow upstream Effect fix if needed, rather
+than building a replacement native watcher.
 
 A Sol investigator tested the underlying native behavior on Linux/Bun: direct
 file watching detached after atomic replacement; parent watching continued.

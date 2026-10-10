@@ -196,8 +196,16 @@ The inspected Node implementation also:
   file's parent for classification;
 - drops null filenames before callers can see them;
 - classifies rename via asynchronous stat, treating any stat failure as remove;
-- ends its stream on watcher close and fails on watcher error;
+- ends its stream on watcher close and fails on asynchronous watcher error;
 - closes acquired watchers when their scope ends.
+
+Synchronous `NFS.watch` setup throws are a separate limitation: the pinned code
+uses `Effect.sync` inside `Stream.callback`, and callback setup is forked without
+forwarding its failure into the delivery queue. A setup defect may therefore
+leave a pending stream rather than a typed error visible to Plus. Native
+best-effort readiness must not promise detection/retry of every acquisition
+failure. Verify this seam in conformance work; a narrow Effect companion fix
+forwarding setup failure is preferable to reimplementing native watching here.
 
 Therefore raw events are hints and may reorder. Plus must normalize against
 the **actual anchor**, not blindly append a name to the requested target.
@@ -214,7 +222,7 @@ Required generic behavior:
 5. Share identical physical anchor watches within one Layer via scoped leases.
    Apply logical subscriber filtering afterward. Overlapping-root consolidation
    is optional later work.
-6. Provide bounded native retry after failures/unexpected completion, plus
+6. Provide bounded native retry after observable failures/unexpected completion, plus
    caller-controlled periodic authoritative reconciliation where needed.
 
 A bounded topology check is reasonable for missing/replaced anchors. It does
