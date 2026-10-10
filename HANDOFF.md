@@ -46,7 +46,7 @@ captured filesystem service without replacing it and recursing into itself.
 | File atomic saves | Observe parent, filter basename | Parent/root subscription and mapping |
 | Missing targets/root replacement | Existing-ancestor watch; reanchor; bounded topology checks as needed | Root/cancellation/identity handling, supplemented where daemon coverage is insufficient |
 | Ignores/selection | Normalize and filter locally | Proven pathname pushdown plus residual filtering |
-| Coalescing/pressure | Bounded dirty-path sets; latched resync on loss | Preserve daemon batches and catch up where possible |
+| Coalescing/pressure | Bounded Plus-owned dirty-path/delivery sets; latched resync on known loss | Preserve daemon batches and catch up where possible |
 | Sharing | Identical native anchor leases | Canonical root manager and named interests |
 | Initial readiness | Honest best-effort; no native registration acknowledgement | Confirmed attach |
 | Known-gap recovery | Reacquire plus caller reconciliation | Compatible clock catch-up, otherwise reconciliation |
@@ -66,7 +66,7 @@ atomic content snapshots or a native attach barrier.
 2. **Resilient scopes and topology.** Parent-anchor files; test atomic replacement
    followed by another edit. Handle missing parents, target recreation, unexpected
    stream completion/errors and cancellation during acquisition. Share identical
-   anchors without affecting sibling handles on release. Bound buffering.
+   anchors without affecting sibling handles on release. Bound Plus-owned buffering.
 3. **Reconciliation helper.** Initial read, batched path dirtiness, known-loss
    resync, and no lost rerun when changes arrive during the read. Keep domain
    contents with the caller. Test a consumer's final state, not callback counts.
@@ -107,6 +107,12 @@ callback-setup fiber; the pinned callback implementation does not forward that
 failure to the queue. Plus cannot promise detection/retry of every setup failure.
 Test this boundary and identify a narrow upstream Effect fix if needed, rather
 than building a replacement native watcher.
+
+Effect's native callback stream also has an upstream unbounded queue, with no
+buffer option exposed by `FileSystem.watch`. Bounding Plus's delivery queues
+does not change that. Drain promptly, state the limit, and treat an upstream
+queue/overflow capability as companion work if required; do not promise an
+end-to-end native memory bound.
 
 A Sol investigator tested the underlying native behavior on Linux/Bun: direct
 file watching detached after atomic replacement; parent watching continued.

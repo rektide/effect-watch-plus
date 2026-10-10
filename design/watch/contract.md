@@ -268,10 +268,18 @@ rewrite the user's root configuration to achieve the application policy.
 
 ## Backpressure, ownership and baseline escape hatch
 
-Bound pending path sets/queues. Coalescing can collapse repeated hints. Once a
+Bound Plus-owned pending path sets/queues. Coalescing can collapse repeated hints. Once a
 consumer has lost deltas, latch resync/failure so it cannot lose the only repair
 signal. Slow consumers must not block unrelated roots. No publishing after
 release; interrupt and join owned work with bounded cleanup.
+
+This does not bound every upstream buffer. Pinned Effect NodeFileSystem uses
+`Stream.callback` with its default unbounded queue and exposes no buffer option
+through `FileSystem.watch`. Plus can drain that stream promptly and bound its
+own delivery/reconciliation work, but cannot claim end-to-end bounded native
+buffering. Document this first-cut limitation; an upstream queue/overflow seam
+would be a separate Effect improvement. Watchman's own transport and delivery
+buffers are under this project's control and must be bounded as specified.
 
 Plain Effect `WatchEvent` has no resync signal. The standard Watchman backend
 therefore fails on known lost continuity (and may initially fail on all transport
