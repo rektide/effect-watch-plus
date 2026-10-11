@@ -27,6 +27,15 @@ const program = Effect.gen(function*() {
   is path-only, including deletes. No Git-ignore/reinclude semantics. Absolute,
   empty, parent-segment and leading-negation patterns fail. See the complete
   [v2 ignore contract](IGNORE.md) for anchoring, escaping and malformed patterns.
+- `defaultIgnores`: defaults to `true`. Excludes `.watchman-cookie-*` files and
+  subtrees at any depth, including create/delete hints from other watcher
+  instances. Set `false` to expose cookies; supplied ignores remain active.
+- `WatchPlus.configured({ ignore, defaultIgnores })`: instance policy for all
+  watches. Instance and per-watch `ignore` arrays are unioned and deduplicated;
+  a per-watch `defaultIgnores` overrides the instance default. `layer` is the
+  default-policy instance. For example, `configured({ ignore: ["cache"] })`
+  suppresses that relative subtree under each watched directory. Neither the
+  library nor its policy reads environment variables or configuration files.
 - `followReplacements: true`: watch an **existing file's parent**, select the
   basename, and survive replacement of that file while parent coverage holds.
   Directory requests and initially missing targets fail. The native decorator
@@ -42,8 +51,10 @@ const program = Effect.gen(function*() {
   option types, or fails with `PlatformError/BadArgument` unless the filesystem
   promises `~effect-watch/options/v2: true` (v1 is rejected).
   Ordinary callers can still use Effect's `FileSystem.FileSystem` service.
-- `WatchPlus.make(fs, path)`: pure decoration for explicit composition/testing.
+- `WatchPlus.make(fs, path, policy?)`: pure decoration for explicit composition/testing.
   It captures the input filesystem and changes only `watch`.
+  Ordinary watch calls now receive cookie filtering too; disable defaults with
+  no supplied ignores to retain the unfiltered native forwarding route.
 
 Streams are lazy, scoped, and emit ordinary Effect Create/Update/Remove **hints**.
 Enhanced unexpected completion fails with `PlatformError/UnexpectedEof`; errors

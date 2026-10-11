@@ -19,7 +19,7 @@ test("checked view is the same object; ordinary calls and non-watch functions ar
     const fs = WatchPlus.make({ ...original, watch: (_target, options) => {
       calls.push(options)
       return Stream.empty
-    } }, path)
+    } }, path, { defaultIgnores: false })
     expect(fs.readFileString).toBe(original.readFileString)
     fs.watch("unchanged")
     fs.watch("unchanged", { recursive: true })
@@ -39,6 +39,66 @@ test("unenhanced filesystem fails explicitly", async () => {
   expect(result._tag).toBe("Failure")
   if (result._tag === "Failure") expect(result.failure.reason._tag).toBe("BadArgument")
 })
+
+test("cookie defaults combine with instance and per-watch ignores, and can be disabled", async () => {
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const target = yield* temporary(fs)
+    const watched = WatchPlus.make({ ...fs, watch: () => Stream.fromArray<FileSystem.WatchEvent>([
+      { _tag: "Create", path: ".watchman-cookie-root" },
+      { _tag: "Remove", path: "nested/.watchman-cookie-deleted" },
+      { _tag: "Update", path: "nested/.watchman-cookie-dir/file" },
+      { _tag: "Update", path: "instance/hidden" },
+      { _tag: "Remove", path: "caller/deleted" },
+      { _tag: "Update", path: "keep" }
+    ]) }, path, { ignore: ["instance"] })
+    const filtered = yield* watched.watch(target, { ignore: ["caller"] }).pipe(Stream.take(1), Stream.runCollect)
+    expect(filtered.map((event) => event.path)).toEqual(["keep"])
+    const raw = yield* watched.watch(target, { defaultIgnores: false, ignore: ["caller"] }).pipe(Stream.take(4), Stream.runCollect)
+    expect(raw.map((event) => event.path)).toEqual([
+      ".watchman-cookie-root", "nested/.watchman-cookie-deleted", "nested/.watchman-cookie-dir/file", "keep"
+    ])
+    const configured = WatchPlus.make(fs, path, { defaultIgnores: false, ignore: ["../invalid"] })
+    const invalid = yield* configured.watch(target).pipe(Stream.runDrain, Effect.result)
+    expect(invalid._tag).toBe("Failure")
+    if (invalid._tag === "Failure") expect(invalid.failure.reason._tag).toBe("BadArgument")
+  })).pipe(Effect.provide(base)))
+})
+
+test("real cookie create/delete crossfire does not trigger refreshes; opt-out and ordinary edits still arrive", async () => {
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* WatchPlus.fileSystem
+    const target = yield* temporary(fs)
+    yield* fs.makeDirectory(target + "/nested")
+    yield* fs.writeFileString(target + "/probe", "before")
+    const audit: Array<FileSystem.WatchEvent> = []
+    const refreshes: Array<FileSystem.WatchEvent> = []
+    yield* fs.watch(target, { recursive: true, defaultIgnores: false }).pipe(
+      Stream.runForEach((event) => Effect.sync(() => audit.push(event))), Effect.forkScoped
+    )
+    yield* fs.watch(target, { recursive: true }).pipe(
+      Stream.runForEach((event) => Effect.sync(() => refreshes.push(event))), Effect.forkScoped
+    )
+    const until = (predicate: () => boolean) => Effect.gen(function*() {
+      while (!predicate()) yield* Effect.sleep("10 millis")
+    }).pipe(Effect.timeout("3 seconds"))
+    const writer = yield* Effect.forever(fs.writeFileString(target + "/probe", "probe").pipe(
+      Effect.andThen(Effect.sleep("10 millis"))
+    )).pipe(Effect.forkScoped)
+    yield* until(() => audit.some((event) => event.path === "probe") && refreshes.some((event) => event.path === "probe"))
+    yield* Fiber.interrupt(writer)
+    for (const name of [".watchman-cookie-root", "nested/.watchman-cookie-nested"]) {
+      yield* fs.writeFileString(target + "/" + name, "barrier")
+      yield* until(() => audit.some((event) => event.path === name && event._tag !== "Remove"))
+      yield* fs.remove(target + "/" + name)
+      yield* until(() => audit.some((event) => event.path === name && event._tag === "Remove"))
+    }
+    yield* fs.writeFileString(target + "/ordinary", "content")
+    yield* until(() => refreshes.some((event) => event.path === "ordinary"))
+    expect(refreshes.filter((event) => event.path.includes(".watchman-cookie-"))).toEqual([])
+  })).pipe(Effect.provide(enhanced)))
+}, 15000)
 
 test("v1 capability is rejected rather than accepting literal-only ignores", async () => {
   await Effect.runPromise(Effect.gen(function*() {

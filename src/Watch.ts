@@ -1,12 +1,14 @@
 export * as WatchPlus from "./Watch.js"
 
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Predicate, Queue, Stream } from "effect"
-import { compileIgnore } from "./Ignore.js"
+import { compileIgnore, resolveIgnore, type IgnoreOptions } from "./Ignore.js"
+
+export { defaultIgnores, resolveIgnore, type IgnoreOptions } from "./Ignore.js"
 
 /** Structural contract shared with independent enhanced-watch providers. */
 export const TypeId = "~effect-watch/options/v2"
 
-export interface WatchOptions extends FileSystem.WatchOptions {
+export interface WatchOptions extends FileSystem.WatchOptions, IgnoreOptions {
   /** Relative literal subtrees or exact-path globs; see README for syntax. */
   readonly ignore?: ReadonlyArray<string> | undefined
   /** Watch an existing file's parent so replacing the file does not detach it. */
@@ -60,35 +62,36 @@ export function reconcile<A, E, R, EW, RW>(
 }
 
 /** Capture an already constructed filesystem. No context lookup occurs in watch. */
-export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSystem {
+export function make(fs: FileSystem.FileSystem, path: Path.Path, instance?: IgnoreOptions): EnhancedFileSystem {
   return {
     ...fs,
     [TypeId]: true,
     watch(target, options) {
-      if (!options?.ignore && !options?.followReplacements) return fs.watch(target, options)
+      const ignore = resolveIgnore(options, instance)
+      if (ignore.length === 0 && !options?.ignore && !options?.followReplacements) return fs.watch(target, options)
       return Stream.unwrap(Effect.gen(function*() {
         const excluded = yield* Effect.try({
-          try: () => compileIgnore(options.ignore ?? [], path),
+          try: () => compileIgnore(ignore, path),
           catch: (cause) => PlatformError.badArgument({ module: "WatchPlus", method: "watch", description: String(cause) })
         })
         const info = yield* fs.stat(target)
-        if (options.followReplacements && info.type !== "File") {
+        if (options?.followReplacements && info.type !== "File") {
           return yield* Effect.fail(PlatformError.badArgument({
             module: "WatchPlus", method: "watch", description: "followReplacements requires an existing file"
           }))
         }
         const directory = path.resolve(info.type === "Directory" ? target : path.dirname(target))
-        const source = options.followReplacements
+        const source = options?.followReplacements
           ? fs.watch(directory, { recursive: false })
-          : fs.watch(target, { recursive: options.recursive })
-        const check = options.followReplacements
+          : fs.watch(target, { recursive: options?.recursive })
+        const check = options?.followReplacements
           ? yield* parentGuard(fs, directory, target)
           : Effect.void
         const filtered = source.pipe(
           Stream.mapEffect((event) => Effect.as(check, event)),
           Stream.filter((event) => {
             const relative = path.relative(directory, path.resolve(directory, event.path))
-            return (!options.followReplacements || relative === path.basename(target)) &&
+            return (!options?.followReplacements || relative === path.basename(target)) &&
               !excluded(relative)
           }),
           Stream.concat(Stream.fail(PlatformError.systemError({
@@ -96,7 +99,7 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
             description: "Enhanced watcher ended; reconcile before restarting"
           })))
         )
-        return options.followReplacements
+        return options?.followReplacements
           ? filtered.pipe(Stream.mergeEffect(Effect.forever(check.pipe(Effect.delay("100 millis")))))
           : filtered
       }))
@@ -127,8 +130,10 @@ function parentGuard(fs: FileSystem.FileSystem, directory: string, target: strin
 }
 
 /** Provide the base filesystem and Path to this layer; it replaces only watch. */
-export const layer = Layer.effect(FileSystem.FileSystem, Effect.gen(function*() {
+export const configured = (options?: IgnoreOptions) => Layer.effect(FileSystem.FileSystem, Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  return make(fs, path)
+  return make(fs, path, options)
 }))
+
+export const layer = configured()
