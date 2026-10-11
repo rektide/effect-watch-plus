@@ -17,15 +17,16 @@ const program = Effect.gen(function*() {
   const fs = yield* WatchPlus.fileSystem
   yield* fs.watch(".", {
     recursive: true,
-    ignore: ["node_modules", ".git"]
+    ignore: ["node_modules", ".git", "**/{node_modules,.git}/**", "**/*.log"]
   }).pipe(Stream.runForEach((event) => Effect.log(event)))
 }).pipe(Effect.provide(filesystem))
 ```
 
-- `ignore`: literal relative paths/subtrees, **not globs** or Git-ignore syntax.
-  For directories, paths are relative to that directory; for files, to their
-  parent. Dotfiles are included, matching is case-sensitive, and trailing
-  separators/`.` segments normalize. Absolute, empty and escaping ignores fail.
+- `ignore`: relative literal subtrees or whole-path globs, compiled once with
+  **minimatch 10.0.3**. Supports globstar, `*`, `?`, braces, and dotfiles; filtering
+  is path-only, including deletes. No Git-ignore/reinclude semantics. Absolute,
+  empty, parent-segment and leading-negation patterns fail. See the complete
+  [v2 ignore contract](IGNORE.md) for anchoring, escaping and malformed patterns.
 - `followReplacements: true`: watch an **existing file's parent**, select the
   basename, and survive replacement of that file while parent coverage holds.
   Directory requests and initially missing targets fail. The native decorator
@@ -38,7 +39,8 @@ const program = Effect.gen(function*() {
    to a different inode; an ancestor move preserving that parent is not a loss.
   It watches the lexical entry, not writes through symbolic links to a referent.
 - `WatchPlus.fileSystem`: returns the same filesystem object with enhanced
-  option types, or fails with `PlatformError/BadArgument` if not installed.
+  option types, or fails with `PlatformError/BadArgument` unless the filesystem
+  promises `~effect-watch/options/v2: true` (v1 is rejected).
   Ordinary callers can still use Effect's `FileSystem.FileSystem` service.
 - `WatchPlus.make(fs, path)`: pure decoration for explicit composition/testing.
   It captures the input filesystem and changes only `watch`.
@@ -51,7 +53,7 @@ Native null-name drops and synchronous setup defects remain upstream limitations
 Polling is not an acquisition acknowledgement or continuous coverage proof:
 brief detach/restore gaps, inode reuse and losses hidden upstream can escape
 detection. This is a native-decorator improvement, not a stronger recovery promise
-required of every v1 provider. Initially missing interests and full topology
+required of every v2 provider. Initially missing interests and full topology
 recovery need a later jointly versioned opt-in; no such options exist here.
 
 The same checked view works with independent enhanced providers such as

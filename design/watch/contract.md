@@ -9,7 +9,7 @@ observation-service architecture preserved at Plus `27a8bdf3` / Watchman
 ## Public vocabulary and composition
 
 The operation remains **`fs.watch(path, options)`**. Standard options/events
-remain Effect's `recursive` and Create/Update/Remove. Version 1 enhances options:
+remain Effect's `recursive` and Create/Update/Remove. Version 2 enhances options:
 
 ```ts
 interface WatchOptions extends FileSystem.WatchOptions {
@@ -19,7 +19,7 @@ interface WatchOptions extends FileSystem.WatchOptions {
 ```
 
 An enhanced filesystem extends Effect's service with the wider watch signature
-and `readonly ["~effect-watch/options/v1"]: true`. This versioned marker is a
+and `readonly ["~effect-watch/options/v2"]: true`. This versioned marker is a
 provider's complete contract promise. Plus and Watchman export structurally
 compatible option/filesystem types and checked accessors. They need no shared
 runtime service, global mutation, registry, or third contract package.
@@ -33,7 +33,8 @@ fs.watch(existingFile, { followReplacements: true })
 ```
 
 The accessor returns the **same object** already at Effect's FileSystem key.
-It fails with `PlatformError/BadArgument` if the marker is absent. It is not an
+It fails with `PlatformError/BadArgument` if the v2 marker is absent (including
+literal-only v1 providers). It is not an
 observation acquisition API and installs nothing. Independent Watchman users
 may use `Watchman.fileSystem` instead; the signature and behavior are identical.
 Ordinary consumers can keep yielding `FileSystem.FileSystem` unchanged.
@@ -43,7 +44,7 @@ native filesystem silently ignore requested options. TypeScript structural
 assignment can still allow prebuilt excess-property variables on base Effect;
 those calls are not a supported way to request enhancements. Future vocabulary
 must add a checked/versioned contract, rather than promising new semantics on
-providers implementing only v1. A marker is a trusted provider contract, not a
+providers implementing only an older version. A marker is a trusted provider contract, not a
 security validator for arbitrary JS implementations.
 
 ### Native decoration
@@ -65,38 +66,37 @@ If the input already uses a Watchman backend, it is not a forced-native layer.
 Watchman directly implements the same options with its captured backend. The
 current seam is `Watchman.fromBackend`, requiring Effect FileSystem, Path and
 WatchBackend. It never calls the captured filesystem's watch and never constructs
-Plus's layer. Backend `None` fails explicitly, not native fallback. The next
-daemon manager stage supplies one scoped backend/manager, shared with any base
-filesystem using it. The decorator creates no managers or background tasks.
+Plus's layer. Backend `None` fails explicitly, not native fallback. The explicit
+socket-configured `Watchman.backendLayer` supplies one scoped backend/manager,
+shared with base filesystems reusing that Layer value. The decorator creates no
+managers or background tasks.
 
 ```text
-effect-watch-plus → Effect peer
-effect-watchman   → Effect peer (later runtime transport)
+effect-watch-plus → Effect peer + minimatch 10.0.3
+effect-watchman   → Effect peer + minimatch 10.0.3 + built-in Unix transport
 application      → either provider; one Effect identity
 ```
 
-No dependency between the two packages is needed for v1. Their small structural
+No dependency between the two packages is needed for v2. Their small structural
 contract is recorded here and proved using installed public package exports.
 Any future common helper export must not make a Plus policy runtime mandatory
 for Watchman. Optional richer operations can preserve daemon information directly.
 
-## Exact v1 semantics
+## Exact v2 semantics
 
-**Ignore** is a list of literal paths; each excludes itself and descendants on
-a path-segment boundary. Directory-relative for directory watches; parent-relative
-for files. Includes dotfiles, case-sensitive matching, platform Path separators,
-normalization of `.` and trailing separators. Empty, absolute and escaping
-exclusions fail with BadArgument. Wildcard characters are literal. No glob,
-Git-ignore, filesystem identity or recursive symlink traversal promise.
-Native uses local filtering; Watchman currently also filters locally. Proven
-pathname-safe daemon pushdown can optimize it later, retaining residual filtering.
-Never discard deletion tombstones with `exists` filters.
+**Ignore** follows the maintained [v2 ignore contract](../../IGNORE.md): literal
+subtrees plus whole-relative-path globs with minimatch 10.0.3, case-sensitive,
+dotfiles included, path-only deletes retained. Compilation is once per consumed
+subscription, never per event. Both providers filter locally. Empty, absolute,
+parent-segment and leading-negation patterns fail; malformed glob delimiters have
+the documented minimatch literal fallback. There is no Git-ignore equivalence.
 
 **Follow replacements** requires an existing file (`stat` reports File).
 It observes the lexical parent nonrecursively and selects the
 basename. Inode replacement of the file leaves that parent observation intact.
-Ignores apply after file selection. Parent disappearance/replacement, missing
-targets and directory lifecycle resilience are **not** implemented. Recursive
+Ignores apply after file selection. Plus detects observed existing-file parent
+identity loss and fails; Watchman has no parent-replacement guarantee. Neither
+repairs topology or supports initially missing targets. Recursive
 selection has no extra meaning for this single-file parent anchor.
 Following writes through a symbolic link is not supported, even when its referent
 has a different name within the same parent. This option observes the lexical

@@ -7,7 +7,7 @@ const program = Effect.gen(function*() {
   const fs = yield* WatchPlus.fileSystem
   yield* fs.watch(process.argv[2] ?? ".", {
     recursive: true,
-    ignore: ["node_modules", ".git"]
+    ignore: ["node_modules", ".git", "**/{node_modules,.git}/**", "**/*.log"]
   }).pipe(Stream.runForEach((event) => Effect.log(event)))
 })
 

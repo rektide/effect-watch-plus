@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Path, PlatformError, Queue, Stream } from "effect"
 import { WatchPlus } from "../effect-watch-plus.js"
+import { cases, ignores } from "./ignore-cases.js"
 
 const base = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)
 const enhanced = WatchPlus.layer.pipe(Layer.provide(base))
@@ -39,6 +40,51 @@ test("unenhanced filesystem fails explicitly", async () => {
   if (result._tag === "Failure") expect(result.failure.reason._tag).toBe("BadArgument")
 })
 
+test("v1 capability is rejected rather than accepting literal-only ignores", async () => {
+  await Effect.runPromise(Effect.gen(function*() {
+    const original = yield* FileSystem.FileSystem
+    const fs = { ...original, "~effect-watch/options/v1": true }
+    expect(WatchPlus.supports(fs)).toBe(false)
+    const result = yield* WatchPlus.fileSystem.pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.result)
+    expect(result._tag).toBe("Failure")
+  }).pipe(Effect.provide(base)))
+})
+
+test("real native globs at a nested root filter edits and deletion tombstones", async () => {
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* WatchPlus.fileSystem
+    const path = yield* Path.Path
+    const scratch = yield* temporary(fs)
+    const target = scratch + "/project/nested"
+    yield* fs.makeDirectory(target, { recursive: true })
+    for (const [name] of cases) {
+      yield* fs.makeDirectory(path.dirname(target + "/" + name), { recursive: true })
+      yield* fs.writeFileString(target + "/" + name, "before")
+    }
+    yield* fs.writeFileString(target + "/probe", "before")
+    const audit: Array<FileSystem.WatchEvent> = []
+    const filtered: Array<FileSystem.WatchEvent> = []
+    yield* fs.watch(target, { recursive: true, ignore: [] }).pipe(Stream.runForEach((event) => Effect.sync(() => audit.push(event))), Effect.forkScoped)
+    yield* fs.watch(target, { recursive: true, ignore: ignores }).pipe(Stream.runForEach((event) => Effect.sync(() => filtered.push(event))), Effect.forkScoped)
+    const until = (predicate: () => boolean) => Effect.gen(function*() {
+      while (!predicate()) yield* Effect.sleep("10 millis")
+    }).pipe(Effect.timeout("3 seconds"))
+    const writer = yield* Effect.forever(fs.writeFileString(target + "/probe", "probe").pipe(Effect.andThen(Effect.sleep("10 millis")))).pipe(Effect.forkScoped)
+    yield* until(() => audit.some((event) => event.path === "probe") && filtered.some((event) => event.path === "probe"))
+    yield* Fiber.interrupt(writer)
+    for (const [name, included] of cases) {
+      yield* fs.writeFileString(target + "/" + name, "after")
+      yield* until(() => audit.some((event) => event.path === name && event._tag !== "Remove"))
+      if (included) yield* until(() => filtered.some((event) => event.path === name && event._tag !== "Remove"))
+      yield* fs.remove(target + "/" + name)
+      yield* until(() => audit.some((event) => event.path === name && event._tag === "Remove"))
+      if (included) yield* until(() => filtered.some((event) => event.path === name && event._tag === "Remove"))
+    }
+    yield* Effect.sleep("100 millis")
+    for (const [name, included] of cases) expect(filtered.some((event) => event.path === name)).toBe(included)
+  })).pipe(Effect.provide(Layer.mergeAll(enhanced, NodePath.layer))))
+}, 15000)
+
 test("recursive literal filters include tombstones, nested paths, dotfiles and sibling boundaries", async () => {
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -65,7 +111,7 @@ test("invalid ignores and directory replacement promises fail instead of being i
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
     const fs = yield* WatchPlus.fileSystem
     const target = yield* temporary(fs)
-    for (const ignore of ["", "../outside", "/absolute"]) {
+    for (const ignore of ["", "../outside", "/absolute", "!keep", "{..,safe}/x"]) {
       const result = yield* fs.watch(target, { ignore: [ignore] }).pipe(Stream.runDrain, Effect.result)
       expect(result._tag).toBe("Failure")
       if (result._tag === "Failure") expect(result.failure.reason._tag).toBe("BadArgument")
@@ -77,6 +123,28 @@ test("invalid ignores and directory replacement promises fail instead of being i
     expect(missing._tag).toBe("Failure")
     if (missing._tag === "Failure") expect(missing.failure.reason._tag).toBe("NotFound")
   })).pipe(Effect.provide(enhanced)))
+})
+
+test("file ignores are parent-relative with and without followReplacements", async () => {
+  await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const directory = yield* temporary(fs)
+    const target = directory + "/config.log"
+    yield* fs.writeFileString(target, "before")
+    const watched = WatchPlus.make({ ...fs, watch: () => Stream.fromArray<FileSystem.WatchEvent>([
+      { _tag: "Remove", path: "config.log" }, { _tag: "Update", path: target }
+    ]) }, path)
+    for (const followReplacements of [false, true]) {
+      const events: Array<FileSystem.WatchEvent> = []
+      const result = yield* watched.watch(target, { ignore: ["**/*.log"], followReplacements }).pipe(
+        Stream.runForEach((event) => Effect.sync(() => events.push(event))), Effect.result
+      )
+      expect(events).toEqual([])
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") expect(result.failure.reason._tag).toBe("UnexpectedEof")
+    }
+  })).pipe(Effect.provide(base)))
 })
 
 test("known completion fails; source errors propagate without a silent retry", async () => {

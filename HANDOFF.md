@@ -5,13 +5,50 @@ Latest user direction supersedes the older mandatory `WatchPlus.open` service an
 Plus-only enriched-adapter proposal preserved at `27a8bdf3`. Current authority:
 [additive contract](design/watch/contract.md), [gate/evidence](design/watch/additive-gate.md).
 
+## Glob integration receipt — current v2
+
+The current checked marker is **`~effect-watch/options/v2`** in both libraries;
+v1/missing providers fail explicitly. Exact runtime dependency **minimatch 10.0.3**
+implements once-per-subscription literal-subtree/whole-path-glob filtering.
+Maintained syntax, normalization, malformed-pattern and escape policy:
+[IGNORE.md](IGNORE.md). OpenCode's current ConfigWatch ignore list is supported.
+Matching is path-only, including deletes; lifecycle code is unchanged. Identical
+scenario tables run through native Plus and the private stock Watchman backend.
+No push, publish, temporary consumer project, or shared service access occurred.
+
+### Integration caveats (current)
+
+- Initially missing enhanced targets fail. `followReplacements` accepts existing
+  files only; Plus detects observed parent identity loss (including changed
+  ancestor resolution) but **does not recover** it. Ordinary directory watching
+  has no added root-replacement guarantee. Detach/restore gaps can escape detection.
+- No readiness barrier, aligned initial inventory, catch-up, or automatic retry.
+  Reconcile reads are caller-owned and cannot recover hints never received.
+- Watchman's terminal connection owner requires a **new Layer scope**, not just
+  retrying its existing filesystem; there is no catch-up/reconnect API.
+- No recursive symlink traversal or writes-through-file-symlink following promise.
+- Native null-name drops, asynchronous hint classification, callback setup
+  defects and unbounded upstream buffering remain. The reconcile dirty bit is
+  bounded, not all delivery. Ignore compilation does not alter these limitations.
+- No gitignore/Parcel equivalence. Native anchors are not shared; Watchman shares
+  one connection/cached project acquisition per reused backend Layer, but separate
+  subscriptions are not merged. There is no broader resource-sharing guarantee.
+
+Final verification: `bun run typecheck` and `bun run build` passed in both repos.
+`WATCH_TEST_DIRECTORY=/home/rektide/tmp-opencode bun run test`: **23 passed** here.
+Watchman with `WATCHMAN_TEST_BINARY=/usr/local/bin/watchman-facebook` and the same
+fixture directory: **24 passed**, including the private stock daemon. Focused
+POSIX/Windows normalization, validation and file-anchor checks also passed.
+Older receipts below are historical; this section supersedes their v1/no-glob
+statements.
+
 ## Implemented, not merely proposed
 
 - `import { WatchPlus } from "effect-watch-plus"` (built ESM + declarations).
 - `WatchPlus.layer`: capture Effect FileSystem/Path, replace only watch.
 - `WatchPlus.fileSystem`: checked same-object typed view, richer ordinary
   `fs.watch(path, options)`; no global WatchOptions augmentation.
-- `ignore`: literal relative subtree exclusions, including nested deletions.
+- `ignore`: literal relative subtree exclusions and whole-path globs, including nested deletions.
 - `followReplacements: true`: existing file parent-anchor, survives atomic save
   and following edit. Requests for directories fail rather than silently downgrade.
 - Native decorator snapshots the actual parent anchor's device/inode identity and
@@ -31,7 +68,7 @@ Plus-only enriched-adapter proposal preserved at `27a8bdf3`. Current authority:
   socket failure) require caller layer reconstruction. No automatic policy or OS
   acquisition acknowledgement is introduced.
 - Effect 4.0.1 exact peer/test baseline; native platform packages also pinned to
-  4.0.1. No runtime dependencies/bundled duplicate Effect. Bun lock, build,
+  4.0.1. Only minimatch is a runtime dependency; no bundled duplicate Effect. Bun lock, build,
   typecheck, test, public exports and a native example are working.
 
 Commits: gate `ebdc5af0`; package baseline `481abfcc`.
@@ -79,7 +116,7 @@ resolution checked one Effect identity. Maintained source:
 
 ## Next stage for Sol Medium, coordinated by parent
 
-1. Initial missing rejection stays v1 policy. Native existing-file parent-anchor
+1. Initial missing rejection stays v2 policy. Native existing-file parent-anchor
    loss detection is implemented, not recovery. Missing interests and full topology
    recovery remain a later jointly versioned opt-in; review before new options.
 2. The optional caller-owned read/reconcile helper is now implemented. Test it
@@ -100,9 +137,9 @@ observed existing-file parent anchor loss terminates the native stream, includin
 ancestor replacement that changes the resolved parent. The polling guard retains
 one parent snapshot per stream; same-parent sharing is deferred. It cannot prove
 continuous coverage or detect every detach/restore gap or inode reuse, and does
-not strengthen recovery requirements for all independent v1 providers.
+not strengthen recovery requirements for all independent v2 providers.
 No readiness barrier, resync union, aligned inventory, clocks, automatic retry,
-glob matcher, native anchor sharing, or bounded native upstream delivery exists.
+native anchor sharing, or bounded native upstream delivery exists.
 Null filenames and synchronous setup defects can be hidden upstream. Future
 readiness/buffering support should prefer a small demonstrated Effect companion
 change over a replacement native watcher. No native recursion implementation.

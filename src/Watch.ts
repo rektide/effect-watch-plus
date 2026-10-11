@@ -1,12 +1,13 @@
 export * as WatchPlus from "./Watch.js"
 
 import { Effect, FileSystem, Layer, Option, Path, PlatformError, Predicate, Queue, Stream } from "effect"
+import { compileIgnore } from "./Ignore.js"
 
 /** Structural contract shared with independent enhanced-watch providers. */
-export const TypeId = "~effect-watch/options/v1"
+export const TypeId = "~effect-watch/options/v2"
 
 export interface WatchOptions extends FileSystem.WatchOptions {
-  /** Literal relative paths; each excludes itself and its descendants. Not globs. */
+  /** Relative literal subtrees or exact-path globs; see README for syntax. */
   readonly ignore?: ReadonlyArray<string> | undefined
   /** Watch an existing file's parent so replacing the file does not detach it. */
   readonly followReplacements?: boolean | undefined
@@ -66,12 +67,10 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
     watch(target, options) {
       if (!options?.ignore && !options?.followReplacements) return fs.watch(target, options)
       return Stream.unwrap(Effect.gen(function*() {
-        const excluded = (options.ignore ?? []).map((name) => path.relative(".", name))
-        if (options.ignore?.some((name) => path.isAbsolute(name)) || excluded.some((name) => name === "" || name === ".." || name.startsWith(".." + path.sep))) {
-          return yield* Effect.fail(PlatformError.badArgument({
-            module: "WatchPlus", method: "watch", description: "ignore paths must be nonempty relative paths within the watch directory"
-          }))
-        }
+        const excluded = yield* Effect.try({
+          try: () => compileIgnore(options.ignore ?? [], path),
+          catch: (cause) => PlatformError.badArgument({ module: "WatchPlus", method: "watch", description: String(cause) })
+        })
         const info = yield* fs.stat(target)
         if (options.followReplacements && info.type !== "File") {
           return yield* Effect.fail(PlatformError.badArgument({
@@ -90,7 +89,7 @@ export function make(fs: FileSystem.FileSystem, path: Path.Path): EnhancedFileSy
           Stream.filter((event) => {
             const relative = path.relative(directory, path.resolve(directory, event.path))
             return (!options.followReplacements || relative === path.basename(target)) &&
-              !excluded.some((name) => relative === name || relative.startsWith(name + path.sep))
+              !excluded(relative)
           }),
           Stream.concat(Stream.fail(PlatformError.systemError({
             module: "WatchPlus", method: "watch", _tag: "UnexpectedEof", pathOrDescriptor: target,

@@ -5,17 +5,22 @@
 	"main": "./dist/effect-watch-plus.js",
 	"types": "./dist/effect-watch-plus.d.ts",
 	"exports": {
-		".": { "types": "./dist/effect-watch-plus.d.ts", "default": "./dist/effect-watch-plus.js" },
+		".": {
+			"types": "./dist/effect-watch-plus.d.ts",
+			"default": "./dist/effect-watch-plus.js"
+		},
 		"./package.json": "./package.json"
 	},
-	"files": ["dist", "README.md"],
+	"files": ["dist", "README.md", "IGNORE.md"],
 	"sideEffects": false,
 	"scripts": {
 		"build": "tsgo -p tsconfig.build.json",
 		"typecheck": "tsgo --noEmit -p tsconfig.json",
 		"test": "bun test ./test"
 	},
-	"peerDependencies": { "effect": "4.0.1" },
+	"peerDependencies": {
+		"effect": "4.0.1"
+	},
 	"devDependencies": {
 		"effect": "4.0.1",
 		"@effect/platform-node": "4.0.1",
@@ -34,5 +39,8 @@
 		"url": "https://github.com/rektide/effect-watch-plus/issues"
 	},
 	"homepage": "https://github.com/rektide/effect-watch-plus#readme",
-	"type": "module"
+	"type": "module",
+	"dependencies": {
+		"minimatch": "10.0.3"
+	}
 }
