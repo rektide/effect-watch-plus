@@ -8,7 +8,7 @@ author: GPT-6.1 Sol xhigh
 date: 2026-10-19
 sources:
   - resource: "opencode://ses_ead2c9a29fferY0Og3JRINkhz4"
-    title: Shared enumeration contract, native/rg implementation, npm compatibility and scoped-process tests
+    title: Shared enumeration implementation, scoped-process verification and reviewed npm nodir classification limits
   - resource: /src/Enumeration.ts
     title: Structural contract shared with independent Watchman
   - resource: /src/Glob.ts
@@ -77,6 +77,11 @@ original dialect. Ordering is sorted/deduplicated for enumerate.
 - `symlinks:"follow"`: recursively traverse directory links, stopping ancestor
   identity cycles without suppressing independent aliases.
 - `metadata:true`: lexical size/mtimeMs, not full Effect File.Info.
+
+`non-directories` is not exact npm `nodir` for every link mode: npm can retain a
+literal directory symlink with `follow:false` (`symlinks:"glob"` traversal), but
+this kind always excludes target directories. For that exact classification,
+enumerate `all` and apply the application's explicit link-mode-specific policy.
 
 Native literal/follow traversal uses Dirents: names-only enumeration does not
 stat every regular file. Symlink classification and requested metadata use lstat /
