@@ -1,4 +1,31 @@
+---
+type: Handoff
+title: Additive Watch Plus
+description: Current native and ripgrep enumeration receipt with preserved watch-only history.
+resource: /HANDOFF.md
+status: active
+author: GPT-6.1 Sol xhigh
+date: 2026-10-19
+sources:
+  - resource: "opencode://ses_ead2c9a29fferY0Og3JRINkhz4"
+    title: Added native/rg enumeration implementation receipt without replacing earlier watch evidence
+  - resource: /ENUMERATION.md
+    title: Native and ripgrep enumeration API and limits
+---
+
 # Build handoff: additive Watch Plus
+
+## Enumeration extension — 2026-10-19
+
+`Glob.layer`, `Glob.nativeBackend()` and `Ripgrep.make` now implement complete
+scanned baselines. The separately checked structural enumeration view matches
+independent Watchman without a runtime dependency. Dotfiles, braces, classes,
+extglobs, excludes, lexical symlink types, npm-default and recursively followed
+symlink traversal, explicit rg ignore policy, scoped placement-aware spawning and
+byte/deadline failure handling are implemented. See [the API](ENUMERATION.md).
+Watch-only entrypoints remain unchanged; older no-inventory/no-recursive-symlink
+claims below describe those interfaces. No aligned baseline-to-changes guarantee
+is added. Older test totals are preserved historical receipts.
 
 2026-10-10, GPT-6.1 Sol. **Architecture gate passed; executable baseline landed.**
 Latest user direction supersedes the older mandatory `WatchPlus.open` service and

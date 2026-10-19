@@ -1,4 +1,24 @@
+---
+type: Overview
+title: effect-watch-plus
+description: Additive Effect watch options and native or scoped-ripgrep baselines.
+resource: /README.md
+status: active
+author: GPT-6.1 Sol xhigh
+date: 2026-10-19
+sources:
+  - resource: "opencode://ses_ead2c9a29fferY0Og3JRINkhz4"
+    title: Added enumeration entrypoints and API reference; retained existing watch documentation
+  - resource: /ENUMERATION.md
+    title: Native and ripgrep baseline API
+---
+
 # effect-watch-plus
+
+**Additive glob/enumeration:** `Glob.layer` / `Glob.nativeBackend()` provide native
+complete scanned baselines; `Ripgrep.make(...)` provides optional scoped-spawner
+file enumeration. Existing watch-only entrypoints are unchanged. See
+[enumeration API, examples and limits](ENUMERATION.md).
 
 Additive watch options for Effect **4.0.1**. Ordinary filesystem methods and
 `fs.watch(path, { recursive })` remain usable. A checked typed view enables
