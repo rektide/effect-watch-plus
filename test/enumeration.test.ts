@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test"
-import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { NodeServices } from "@effect/platform-node"
 import { Effect, FileSystem } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { Glob, Ripgrep } from "../effect-watch-plus.js"
 import { populate } from "./enumeration-cases.js"
+import { inventory } from "./consumer.js"
 
 test("native and real scoped ripgrep implement the same complete file consumer", async () => {
   const scratch = await mkdtemp("/tmp/opencode/plus-enumeration-")
@@ -19,7 +20,10 @@ test("native and real scoped ripgrep implement the same complete file consumer",
     await Effect.runPromise(Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const native = Glob.nativeBackend()
+      expect((yield* native.enumerate({ root: join(root, "not-created") })).entries).toEqual([])
       const rg = Ripgrep.make({ executable: "rg", spawner, inspect: Glob.inspect })
+      expect(yield* inventory(native, join(root, "src"))).toEqual(["a.ts", "b.js", "deep/c.ts", "deep/two.js"])
+      expect(yield* inventory(rg, join(root, "src"))).toEqual(["a.ts", "b.js", "deep/c.ts", "deep/two.js"])
       for (const request of [
         { root, kind: "files" as const, patterns: ["**/*.{ts,js}"] },
         { root, kind: "files" as const, patterns: ["**/*.ts"], symlinks: "follow" as const, dot: true },
@@ -41,6 +45,10 @@ test("native and real scoped ripgrep implement the same complete file consumer",
       const decorated = Glob.make(fs, native, () => root)
       expect(Glob.supports(decorated)).toBe(true)
       expect(yield* decorated.glob("src/*.ts")).toEqual(["src/a.ts"])
+      expect(yield* decorated.glob("alias/**/*.ts")).toEqual(["alias/a.ts", "alias/deep/c.ts"])
+      yield* Effect.promise(() => symlink("absent", join(root, "broken")))
+      const nondirectories = yield* native.enumerate({ root, patterns: ["broken"], kind: "non-directories", symlinks: "glob" })
+      expect(nondirectories.entries.map((entry) => entry.path)).toEqual(["broken"])
       const metadata = yield* native.enumerate({ root, patterns: ["root.ts"], metadata: true })
       expect(metadata.entries[0]?.size).toBeGreaterThan(0)
       yield* Effect.promise(() => symlink(".", join(root, "cycle")))
@@ -72,3 +80,18 @@ test("ripgrep errors, output budgets, invalid framing and deadline never return 
     }
   } finally { await rm(root, { recursive: true, force: true }) }
 }, 10_000)
+
+// chmod cannot remove root's access and is not an ACL denial on Windows.
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("native permission failures are failures in literal, follow and npm modes", async () => {
+  const root = await mkdtemp("/tmp/opencode/native-permission-")
+  const denied = join(root, "denied")
+  await mkdir(denied)
+  await writeFile(join(denied, "hidden.ts"), "not a successful empty scan")
+  await chmod(denied, 0o000)
+  try {
+    for (const symlinks of ["literal", "follow", "glob"] as const) {
+      const result = await Effect.runPromise(Glob.nativeBackend().enumerate({ root, symlinks }).pipe(Effect.result))
+      expect(result._tag).toBe("Failure")
+    }
+  } finally { await chmod(denied, 0o755); await rm(root, { recursive: true, force: true }) }
+})

@@ -21,7 +21,16 @@ export function nativeBackend(): Backend {
     if (!isAbsolute(request.root)) return yield* Effect.fail(badArgument("enumerate requires an absolute root"))
     if (request.policy === "gitignore" || request.coverage === "daemon") return yield* Effect.fail(badArgument("Native enumeration supports literal filesystem coverage only"))
     const matcher = yield* Effect.try({ try: () => selection(request), catch: (cause) => badArgument(String(cause)) })
-    const entries = yield* Effect.tryPromise({ try: (signal) => walk(request, ["."], signal), catch: failure })
+    const present = yield* Effect.tryPromise({ try: () => localEntry(request.root, ".", false).then(() => true, (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return false
+      throw error
+    }), catch: failure })
+    if (!present) return { complete: true as const, kind: "scanned" as const, source: "native" as const, coverage: "filesystem" as const, entries: [] }
+    const entries = yield* Effect.tryPromise({ try: async (signal) => {
+      if (request.symlinks !== "glob") return walk(request, ["."], signal)
+      const { nativeGlob } = await import("./GlobNative.js")
+      return nativeGlob(request, signal)
+    }, catch: failure })
     return {
       complete: true as const, kind: "scanned" as const, source: "native" as const, coverage: "filesystem" as const,
       entries: entries.filter(matcher.accepts).sort((a, b) => a.path.localeCompare(b.path, "en"))

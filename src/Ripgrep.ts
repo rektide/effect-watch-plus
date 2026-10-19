@@ -23,6 +23,7 @@ export function make(options: Options): Backend {
     if (!isAbsolute(request.root) || request.kind !== "files" || request.coverage === "daemon") {
       return yield* Effect.fail(badArgument("Ripgrep requires an absolute root, explicit kind: files, and filesystem coverage"))
     }
+    if (request.symlinks === "glob") return yield* Effect.fail(badArgument("Ripgrep cannot reproduce npm glob's pattern-dependent symlink traversal; select a native or Watchman backend explicitly"))
     if (!options.executable || [options.maxOutputBytes ?? 32 * 1024 * 1024, options.maxStderrBytes ?? 64 * 1024, options.timeoutMs ?? 60_000].some((value) => !Number.isSafeInteger(value) || value <= 0)) {
       return yield* Effect.fail(badArgument("Ripgrep executable and positive finite integer budgets are required"))
     }

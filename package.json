@@ -1,7 +1,7 @@
 {
 	"name": "effect-watch-plus",
 	"version": "1.0.0",
-	"description": "Additive watch options for Effect FileSystem",
+	"description": "Additive Effect filesystem watch options and native or scoped-ripgrep enumeration",
 	"main": "./dist/effect-watch-plus.js",
 	"types": "./dist/effect-watch-plus.d.ts",
 	"exports": {
@@ -11,7 +11,7 @@
 		},
 		"./package.json": "./package.json"
 	},
-	"files": ["dist", "README.md", "IGNORE.md"],
+	"files": ["dist", "README.md", "IGNORE.md", "ENUMERATION.md"],
 	"sideEffects": false,
 	"scripts": {
 		"build": "tsgo -p tsconfig.build.json",
@@ -22,11 +22,12 @@
 		"effect": "4.0.1"
 	},
 	"devDependencies": {
-		"effect": "4.0.1",
 		"@effect/platform-node": "4.0.1",
 		"@effect/platform-node-shared": "4.0.1",
 		"@types/bun": "1.4.0",
-		"@typescript/native-preview": "7.0.0-dev.20251207.1"
+		"@types/node": "26.6.5",
+		"@typescript/native-preview": "7.0.0-dev.20251207.1",
+		"effect": "4.0.1"
 	},
 	"repository": {
 		"type": "git",
@@ -41,6 +42,7 @@
 	"homepage": "https://github.com/rektide/effect-watch-plus#readme",
 	"type": "module",
 	"dependencies": {
+		"glob": "13.0.6",
 		"minimatch": "10.0.3"
 	}
 }
