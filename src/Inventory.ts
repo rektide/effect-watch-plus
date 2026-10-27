@@ -22,6 +22,7 @@ export type InventoryChange =
   | { readonly type: "present"; readonly entry: LexicalEntry }
   | { readonly type: "removed"; readonly path: string }
 export type InventoryEvent =
+  /** Supersession watermark: invalidate any applied epoch <= this epoch, including coalesced resets. */
   | { readonly type: "invalidated"; readonly epoch: number; readonly reason: string }
   | { readonly type: "baseline"; readonly epoch: number; readonly entries: ReadonlyArray<LexicalEntry> }
   | { readonly type: "changes"; readonly epoch: number; readonly sequence: number; readonly changes: ReadonlyArray<InventoryChange> }

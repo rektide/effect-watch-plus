@@ -33,6 +33,9 @@ is an `InventorySource`.
   Every event carries its view epoch; changes additionally carry a local sequence.
   Invalidation clears undelivered prior-epoch events. Already delivered work
   remains the consumer's responsibility to reject by epoch.
+  Its epoch is a supersession watermark: invalidate any applied epoch less than
+  or equal to it, not only an exactly equal epoch. Multiple pending resets may
+  coalesce before the consumer sees their invalidation.
 - `state` reports acquiring/active/repairing/failed/closed, epoch and optional
   reason. `rebaseline(reason)` requests replacement; it does not await readiness.
   A terminal view must be reacquired, not restarted.
