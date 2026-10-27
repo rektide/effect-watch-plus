@@ -146,3 +146,8 @@ bun examples/native.ts /directory/to/watch
 Live tests accept `WATCH_TEST_DIRECTORY` to choose temporary storage.
 [Contract](design/watch/contract.md), [gate/evidence](design/watch/additive-gate.md),
 and [next-stage handoff](HANDOFF.md) describe scope and remaining work.
+# Observed inventory
+
+The additive [`effect-watch-plus/inventory`](doc/inventory/contract0.sol61x.md)
+subpath defines scoped, epoch-tagged lexical source contracts. It installs no
+backend; `effect-watchman` implements the capability.
