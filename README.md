@@ -7,6 +7,8 @@ status: active
 author: GPT-6.1 Sol xhigh
 date: 2026-10-19
 sources:
+  - resource: "opencode://ses_e7c9d0041ffeVARzmCo25gRZvM"
+    title: Ship raw TypeScript sources; repoint package entrypoints at .ts files
   - resource: "opencode://ses_ead2c9a29fferY0Og3JRINkhz4"
     title: Added enumeration entrypoints and API reference; retained existing watch documentation
   - resource: /ENUMERATION.md
@@ -23,6 +25,11 @@ file enumeration. Existing watch-only entrypoints are unchanged. See
 Additive watch options for Effect **4.0.1**. Ordinary filesystem methods and
 `fs.watch(path, { recursive })` remain usable. A checked typed view enables
 enhancements without globally making unsupported native options typecheck.
+
+The package ships raw TypeScript sources: `main`/`types`/`exports` (including
+`effect-watch-plus/inventory`) point at `.ts` files and there is no build
+output. Consumers type-strip (Bun) or use their own consumption tooling; no
+`dist` step is needed when linking the repository.
 
 ```ts
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
